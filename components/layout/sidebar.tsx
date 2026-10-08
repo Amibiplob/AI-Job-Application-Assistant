@@ -4,9 +4,12 @@ import {
   BriefcaseBusiness,
   FileText,
   LayoutDashboard,
+  LogOut,
   Search,
   Settings2,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { logout } from "@/app/dashboard/actions";
 
 const navigation = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard, active: true },
@@ -31,12 +34,17 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="hidden flex-1 lg:block" />
-      <div className="hidden border-t border-[#e8ebe6] p-4 lg:block">
-        <Link href="#settings" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-[#697169] hover:bg-[#f6f7f5] hover:text-[#34483a]"><Settings2 size={17} strokeWidth={1.8} aria-hidden="true" />Settings</Link>
-        <div className="mt-4 rounded-xl bg-[#f6f8f5] p-4">
+      <div className="border-t border-[#e8ebe6] p-3 lg:p-4">
+        <Link href="#settings" className="hidden items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-[#697169] hover:bg-[#f6f7f5] hover:text-[#34483a] lg:flex"><Settings2 size={17} strokeWidth={1.8} aria-hidden="true" />Settings</Link>
+        <div className="mt-4 hidden rounded-xl bg-[#f6f8f5] p-4 lg:block">
           <p className="text-xs font-semibold text-[#48544a]">A note for your search</p>
           <p className="mt-1.5 text-[11px] leading-5 text-[#7b8379]">Match scores are a starting point for your own judgment.</p>
         </div>
+        <form action={logout} className="lg:mt-3">
+          <Button type="submit" variant="ghost" className="h-10 w-full justify-start gap-3 px-3 text-[13px] font-medium text-[#697169] hover:bg-[#f6f7f5] hover:text-[#34483a]">
+            <LogOut size={17} strokeWidth={1.8} aria-hidden="true" />Log out
+          </Button>
+        </form>
       </div>
     </aside>
   );
