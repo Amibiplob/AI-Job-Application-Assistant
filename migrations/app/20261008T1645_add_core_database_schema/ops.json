@@ -1,0 +1,700 @@
+[
+  {
+    "id": "schema.public",
+    "label": "Create schema \"public\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres"
+    },
+    "precheck": [],
+    "execute": [
+      {
+        "description": "Create schema \"public\"",
+        "sql": "CREATE SCHEMA IF NOT EXISTS \"public\"",
+        "params": []
+      }
+    ],
+    "postcheck": []
+  },
+  {
+    "id": "table.applications",
+    "label": "Create table \"applications\"",
+    "summary": "Creates table \"applications\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "applications"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"applications\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"applications\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"applications\"",
+        "sql": "CREATE TABLE \"public\".\"applications\" (\n  \"appliedAt\" timestamptz(3),\n  \"createdAt\" timestamptz(3) DEFAULT (now()) NOT NULL,\n  \"id\" uuid NOT NULL,\n  \"jobId\" uuid NOT NULL,\n  \"notes\" text,\n  \"status\" text DEFAULT 'saved' NOT NULL,\n  \"updatedAt\" timestamptz NOT NULL,\n  \"userId\" uuid NOT NULL,\n  PRIMARY KEY (\"id\"),\n  CONSTRAINT \"applications_status_check_aa024942\" CHECK (\"status\" IN ('saved', 'applied', 'interview', 'rejected', 'offer', 'withdrawn'))\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"applications\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"applications\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.jobs",
+    "label": "Create table \"jobs\"",
+    "summary": "Creates table \"jobs\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "jobs"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"jobs\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"jobs\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"jobs\"",
+        "sql": "CREATE TABLE \"public\".\"jobs\" (\n  \"company\" text NOT NULL,\n  \"createdAt\" timestamptz(3) DEFAULT (now()) NOT NULL,\n  \"description\" text,\n  \"employmentType\" text,\n  \"externalId\" text,\n  \"id\" uuid NOT NULL,\n  \"jobUrl\" text,\n  \"location\" text,\n  \"postedAt\" timestamptz(3),\n  \"salaryCurrency\" character varying(3),\n  \"salaryMax\" numeric(12,2),\n  \"salaryMin\" numeric(12,2),\n  \"salaryPeriod\" text,\n  \"source\" text NOT NULL,\n  \"title\" text NOT NULL,\n  \"updatedAt\" timestamptz NOT NULL,\n  \"workplaceType\" text,\n  PRIMARY KEY (\"id\"),\n  CONSTRAINT \"jobs_workplaceType_check_aedf07f5\" CHECK (\"workplaceType\" IN ('remote', 'hybrid', 'onsite'))\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"jobs\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"jobs\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.resumes",
+    "label": "Create table \"resumes\"",
+    "summary": "Creates table \"resumes\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "resumes"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"resumes\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"resumes\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"resumes\"",
+        "sql": "CREATE TABLE \"public\".\"resumes\" (\n  \"content\" text NOT NULL,\n  \"createdAt\" timestamptz(3) DEFAULT (now()) NOT NULL,\n  \"id\" uuid NOT NULL,\n  \"name\" text NOT NULL,\n  \"updatedAt\" timestamptz NOT NULL,\n  \"userId\" uuid NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"resumes\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"resumes\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.users",
+    "label": "Create table \"users\"",
+    "summary": "Creates table \"users\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "users"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"users\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"users\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"users\"",
+        "sql": "CREATE TABLE \"public\".\"users\" (\n  \"createdAt\" timestamptz(3) DEFAULT (now()) NOT NULL,\n  \"email\" text NOT NULL,\n  \"id\" uuid NOT NULL,\n  \"name\" text NOT NULL,\n  \"updatedAt\" timestamptz NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"users\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"users\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "unique.applications.applications_userId_jobId_key",
+    "label": "Add unique constraint on \"applications\" (userId, jobId)",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "unique",
+        "name": "applications_userId_jobId_key",
+        "table": "applications"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure constraint \"applications_userId_jobId_key\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "applications_userId_jobId_key",
+          "public",
+          "\"public\".\"applications\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add unique constraint \"applications_userId_jobId_key\"",
+        "sql": "ALTER TABLE \"public\".\"applications\" ADD CONSTRAINT \"applications_userId_jobId_key\" UNIQUE (\"userId\", \"jobId\")"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify constraint \"applications_userId_jobId_key\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "applications_userId_jobId_key",
+          "public",
+          "\"public\".\"applications\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "unique.jobs.jobs_source_externalId_key",
+    "label": "Add unique constraint on \"jobs\" (source, externalId)",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "unique",
+        "name": "jobs_source_externalId_key",
+        "table": "jobs"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure constraint \"jobs_source_externalId_key\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "jobs_source_externalId_key",
+          "public",
+          "\"public\".\"jobs\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add unique constraint \"jobs_source_externalId_key\"",
+        "sql": "ALTER TABLE \"public\".\"jobs\" ADD CONSTRAINT \"jobs_source_externalId_key\" UNIQUE (\"source\", \"externalId\")"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify constraint \"jobs_source_externalId_key\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "jobs_source_externalId_key",
+          "public",
+          "\"public\".\"jobs\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "unique.users.users_email_key",
+    "label": "Add unique constraint on \"users\" (email)",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "unique",
+        "name": "users_email_key",
+        "table": "users"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure constraint \"users_email_key\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "users_email_key",
+          "public",
+          "\"public\".\"users\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add unique constraint \"users_email_key\"",
+        "sql": "ALTER TABLE \"public\".\"users\" ADD CONSTRAINT \"users_email_key\" UNIQUE (\"email\")"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify constraint \"users_email_key\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "users_email_key",
+          "public",
+          "\"public\".\"users\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.applications.applications_jobId_idx_623c8f77",
+    "label": "Create index \"applications_jobId_idx_623c8f77\" on \"applications\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "applications_jobId_idx_623c8f77",
+        "table": "applications"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"applications_jobId_idx_623c8f77\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"applications_jobId_idx_623c8f77\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"applications_jobId_idx_623c8f77\"",
+        "sql": "CREATE INDEX \"applications_jobId_idx_623c8f77\" ON \"public\".\"applications\" (\"jobId\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"applications_jobId_idx_623c8f77\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"applications_jobId_idx_623c8f77\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.applications.applications_userId_idx_a489d58a",
+    "label": "Create index \"applications_userId_idx_a489d58a\" on \"applications\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "applications_userId_idx_a489d58a",
+        "table": "applications"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"applications_userId_idx_a489d58a\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"applications_userId_idx_a489d58a\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"applications_userId_idx_a489d58a\"",
+        "sql": "CREATE INDEX \"applications_userId_idx_a489d58a\" ON \"public\".\"applications\" (\"userId\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"applications_userId_idx_a489d58a\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"applications_userId_idx_a489d58a\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.applications.applications_userId_status_updatedAt_idx_ed357f79",
+    "label": "Create index \"applications_userId_status_updatedAt_idx_ed357f79\" on \"applications\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "applications_userId_status_updatedAt_idx_ed357f79",
+        "table": "applications"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"applications_userId_status_updatedAt_idx_ed357f79\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"applications_userId_status_updatedAt_idx_ed357f79\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"applications_userId_status_updatedAt_idx_ed357f79\"",
+        "sql": "CREATE INDEX \"applications_userId_status_updatedAt_idx_ed357f79\" ON \"public\".\"applications\" (\"userId\", \"status\", \"updatedAt\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"applications_userId_status_updatedAt_idx_ed357f79\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"applications_userId_status_updatedAt_idx_ed357f79\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.jobs.jobs_company_idx_d9dda74a",
+    "label": "Create index \"jobs_company_idx_d9dda74a\" on \"jobs\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "jobs_company_idx_d9dda74a",
+        "table": "jobs"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"jobs_company_idx_d9dda74a\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"jobs_company_idx_d9dda74a\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"jobs_company_idx_d9dda74a\"",
+        "sql": "CREATE INDEX \"jobs_company_idx_d9dda74a\" ON \"public\".\"jobs\" (\"company\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"jobs_company_idx_d9dda74a\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"jobs_company_idx_d9dda74a\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.jobs.jobs_source_postedAt_idx_76a1c950",
+    "label": "Create index \"jobs_source_postedAt_idx_76a1c950\" on \"jobs\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "jobs_source_postedAt_idx_76a1c950",
+        "table": "jobs"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"jobs_source_postedAt_idx_76a1c950\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"jobs_source_postedAt_idx_76a1c950\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"jobs_source_postedAt_idx_76a1c950\"",
+        "sql": "CREATE INDEX \"jobs_source_postedAt_idx_76a1c950\" ON \"public\".\"jobs\" (\"source\", \"postedAt\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"jobs_source_postedAt_idx_76a1c950\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"jobs_source_postedAt_idx_76a1c950\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.resumes.resumes_userId_idx_a489d58a",
+    "label": "Create index \"resumes_userId_idx_a489d58a\" on \"resumes\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "resumes_userId_idx_a489d58a",
+        "table": "resumes"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"resumes_userId_idx_a489d58a\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"resumes_userId_idx_a489d58a\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"resumes_userId_idx_a489d58a\"",
+        "sql": "CREATE INDEX \"resumes_userId_idx_a489d58a\" ON \"public\".\"resumes\" (\"userId\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"resumes_userId_idx_a489d58a\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"resumes_userId_idx_a489d58a\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.resumes.resumes_userId_updatedAt_idx_42f5280d",
+    "label": "Create index \"resumes_userId_updatedAt_idx_42f5280d\" on \"resumes\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "resumes_userId_updatedAt_idx_42f5280d",
+        "table": "resumes"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"resumes_userId_updatedAt_idx_42f5280d\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"resumes_userId_updatedAt_idx_42f5280d\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"resumes_userId_updatedAt_idx_42f5280d\"",
+        "sql": "CREATE INDEX \"resumes_userId_updatedAt_idx_42f5280d\" ON \"public\".\"resumes\" (\"userId\", \"updatedAt\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"resumes_userId_updatedAt_idx_42f5280d\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"resumes_userId_updatedAt_idx_42f5280d\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "foreignKey.applications.applications_userId_fkey",
+    "label": "Add foreign key \"applications_userId_fkey\" on \"applications\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "foreignKey",
+        "name": "applications_userId_fkey",
+        "table": "applications"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure FK \"applications_userId_fkey\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "applications_userId_fkey",
+          "public",
+          "\"public\".\"applications\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add FK \"applications_userId_fkey\"",
+        "sql": "ALTER TABLE \"public\".\"applications\"\nADD CONSTRAINT \"applications_userId_fkey\"\nFOREIGN KEY (\"userId\")\nREFERENCES \"public\".\"users\" (\"id\")\nON DELETE CASCADE"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify FK \"applications_userId_fkey\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "applications_userId_fkey",
+          "public",
+          "\"public\".\"applications\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "foreignKey.applications.applications_jobId_fkey",
+    "label": "Add foreign key \"applications_jobId_fkey\" on \"applications\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "foreignKey",
+        "name": "applications_jobId_fkey",
+        "table": "applications"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure FK \"applications_jobId_fkey\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "applications_jobId_fkey",
+          "public",
+          "\"public\".\"applications\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add FK \"applications_jobId_fkey\"",
+        "sql": "ALTER TABLE \"public\".\"applications\"\nADD CONSTRAINT \"applications_jobId_fkey\"\nFOREIGN KEY (\"jobId\")\nREFERENCES \"public\".\"jobs\" (\"id\")\nON DELETE RESTRICT"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify FK \"applications_jobId_fkey\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "applications_jobId_fkey",
+          "public",
+          "\"public\".\"applications\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "foreignKey.resumes.resumes_userId_fkey",
+    "label": "Add foreign key \"resumes_userId_fkey\" on \"resumes\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "foreignKey",
+        "name": "resumes_userId_fkey",
+        "table": "resumes"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure FK \"resumes_userId_fkey\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "resumes_userId_fkey",
+          "public",
+          "\"public\".\"resumes\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add FK \"resumes_userId_fkey\"",
+        "sql": "ALTER TABLE \"public\".\"resumes\"\nADD CONSTRAINT \"resumes_userId_fkey\"\nFOREIGN KEY (\"userId\")\nREFERENCES \"public\".\"users\" (\"id\")\nON DELETE CASCADE"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify FK \"resumes_userId_fkey\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "resumes_userId_fkey",
+          "public",
+          "\"public\".\"resumes\""
+        ]
+      }
+    ]
+  }
+]
