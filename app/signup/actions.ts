@@ -57,8 +57,8 @@ export async function signup(
 
   if (!password) {
     errors.password = "Enter a password.";
-  } else if ([...password].length < 12) {
-    errors.password = "Use at least 12 characters for your password.";
+  } else if ([...password].length < 8) {
+    errors.password = "Use at least 8 characters for your password.";
   } else if (Buffer.byteLength(password, "utf8") > 1024) {
     errors.password = "Password must be 1024 bytes or fewer.";
   }

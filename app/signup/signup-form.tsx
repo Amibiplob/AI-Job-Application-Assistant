@@ -69,7 +69,7 @@ export function SignupForm() {
           name="password"
           type="password"
           autoComplete="new-password"
-          minLength={12}
+          minLength={8}
           maxLength={1024}
           required
           aria-invalid={Boolean(state.errors?.password)}
@@ -82,7 +82,7 @@ export function SignupForm() {
           </p>
         ) : (
           <p id="password-hint" className="text-xs text-[#7b827a]">
-            Use at least 12 characters.
+            Use at least 8 characters for your password.
           </p>
         )}
       </div>
@@ -96,7 +96,7 @@ export function SignupForm() {
           name="confirmPassword"
           type="password"
           autoComplete="new-password"
-          minLength={12}
+          minLength={8}
           maxLength={1024}
           required
           aria-invalid={Boolean(state.errors?.confirmPassword)}
