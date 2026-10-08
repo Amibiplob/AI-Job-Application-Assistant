@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Navbar } from "@/components/layout/navbar";
 import { Sidebar } from "@/components/layout/sidebar";
+import { getCurrentUser } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 // Local demonstration data; replace with the user's job-search data when available.
 const stats = [
@@ -63,7 +65,12 @@ const recommendedJobs = [
   },
 ];
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const currentUser = await getCurrentUser();
+  if (!currentUser) {
+    redirect("/login");
+  }
+
   return (
     <div className="min-h-screen bg-[#f7f8f6] text-[#20241f]">
       <Sidebar />
