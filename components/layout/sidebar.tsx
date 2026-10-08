@@ -5,6 +5,7 @@ import {
   FileText,
   LayoutDashboard,
   LogOut,
+  FileUser,
   Search,
   Settings2,
 } from "lucide-react";
@@ -12,13 +13,14 @@ import { Button } from "@/components/ui/button";
 import { logout } from "@/app/dashboard/actions";
 
 const navigation = [
-  { label: "Overview", href: "/dashboard", icon: LayoutDashboard, active: true },
-  { label: "Find jobs", href: "#find-jobs", icon: Search, active: false },
-  { label: "Saved jobs", href: "#saved-jobs", icon: Bookmark, active: false },
-  { label: "Applications", href: "#applications", icon: FileText, active: false },
+  { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Resume", href: "/dashboard/resume", icon: FileUser },
+  { label: "Find jobs", href: "#find-jobs", icon: Search },
+  { label: "Saved jobs", href: "#saved-jobs", icon: Bookmark },
+  { label: "Applications", href: "#applications", icon: FileText },
 ];
 
-export function Sidebar() {
+export function Sidebar({ activeHref = "/dashboard" }: { activeHref?: string }) {
   return (
     <aside className="border-b border-[#e8ebe6] bg-white lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:flex lg:w-[250px] lg:flex-col lg:border-b-0 lg:border-r">
       <Link href="/" className="hidden h-[68px] items-center gap-2.5 border-b border-[#e8ebe6] px-6 lg:flex" aria-label="AI Job Assistant home">
@@ -27,11 +29,14 @@ export function Sidebar() {
       </Link>
       <nav aria-label="Dashboard navigation" className="flex gap-1 overflow-x-auto px-3 py-2 lg:flex-col lg:gap-1.5 lg:overflow-visible lg:px-4 lg:py-7">
         <p className="hidden px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9aa097] lg:block">Workspace</p>
-        {navigation.map(({ label, href, icon: Icon, active }) => (
+        {navigation.map(({ label, href, icon: Icon }) => {
+          const active = href === activeHref;
+          return (
           <Link key={label} href={href} aria-current={active ? "page" : undefined} className={`flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-colors ${active ? "bg-[#edf2ec] text-[#365440]" : "text-[#697169] hover:bg-[#f6f7f5] hover:text-[#34483a]"}`}>
             <Icon size={17} strokeWidth={1.8} aria-hidden="true" />{label}
           </Link>
-        ))}
+          );
+        })}
       </nav>
       <div className="hidden flex-1 lg:block" />
       <div className="border-t border-[#e8ebe6] p-3 lg:p-4">
