@@ -151,7 +151,7 @@ export default async function JobsPage({ searchParams }: { searchParams: SearchP
                       <div className="flex items-start gap-3.5">
                         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#eef2e9] text-[#4c684f]"><BriefcaseBusiness size={17} aria-hidden="true" /></span>
                         <div className="min-w-0 flex-1">
-                          <h2 className="break-words font-semibold tracking-[-0.02em]">{job.title}</h2>
+                          <h2 className="break-words font-semibold tracking-[-0.02em]"><Link href={`/dashboard/jobs/${job.id}`} className="rounded-sm hover:text-[#4c6b52] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#66806a]">{job.title}</Link></h2>
                           <p className="mt-1 text-sm text-[#5e685f]">{job.company}</p>
                           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[#737c72]">
                             {job.location && <span className="inline-flex items-center gap-1"><MapPin size={13} aria-hidden="true" />{job.location}</span>}
