@@ -7,7 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Navbar } from "@/components/layout/navbar";
 import { Sidebar } from "@/components/layout/sidebar";
 import { getCurrentUser } from "@/lib/auth";
+import { getApplicationForJob } from "@/lib/applications";
 import { getJobById, type Job } from "@/lib/jobs";
+import { ApplicationControl } from "./application-control";
 import { JobMatcher } from "./job-matcher";
 
 function formatSalary(job: Job): string | null {
@@ -51,6 +53,7 @@ export default async function JobDetailsPage({ params }: { params: Promise<{ job
   const job = await getJobById(jobId);
   if (!job) notFound();
 
+  const application = await getApplicationForJob(job.id);
   const salary = formatSalary(job);
   const posted = formatDate(job.postedAt);
   const externalUrl = safeExternalUrl(job.jobUrl);
@@ -92,6 +95,8 @@ export default async function JobDetailsPage({ params }: { params: Promise<{ job
               </div>
             </CardContent>
           </Card>
+
+          <ApplicationControl jobId={job.id} initialStatus={application?.status ?? null} />
 
           <JobMatcher jobId={job.id} />
 

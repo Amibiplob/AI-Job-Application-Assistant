@@ -17,7 +17,7 @@ const navigation = [
   { label: "Resume", href: "/dashboard/resume", icon: FileUser },
   { label: "Jobs", href: "/dashboard/jobs", icon: Search },
   { label: "Saved jobs", href: "#saved-jobs", icon: Bookmark },
-  { label: "Applications", href: "#applications", icon: FileText },
+  { label: "Applications", href: "/dashboard/applications", icon: FileText },
 ];
 
 export function Sidebar({ activeHref = "/dashboard" }: { activeHref?: string }) {
