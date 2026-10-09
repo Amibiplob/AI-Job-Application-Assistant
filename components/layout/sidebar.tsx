@@ -15,7 +15,7 @@ import { logout } from "@/app/dashboard/actions";
 const navigation = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Resume", href: "/dashboard/resume", icon: FileUser },
-  { label: "Find jobs", href: "#find-jobs", icon: Search },
+  { label: "Jobs", href: "/dashboard/jobs", icon: Search },
   { label: "Saved jobs", href: "#saved-jobs", icon: Bookmark },
   { label: "Applications", href: "#applications", icon: FileText },
 ];
