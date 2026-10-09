@@ -8,6 +8,7 @@ import { Navbar } from "@/components/layout/navbar";
 import { Sidebar } from "@/components/layout/sidebar";
 import { getCurrentUser } from "@/lib/auth";
 import { getJobById, type Job } from "@/lib/jobs";
+import { JobMatcher } from "./job-matcher";
 
 function formatSalary(job: Job): string | null {
   if (job.salaryMin === null && job.salaryMax === null) return null;
@@ -91,6 +92,8 @@ export default async function JobDetailsPage({ params }: { params: Promise<{ job
               </div>
             </CardContent>
           </Card>
+
+          <JobMatcher jobId={job.id} />
 
           <Card className="mt-4 gap-0 rounded-xl border-0 bg-white py-0 shadow-none ring-1 ring-[#e8ebe6]">
             <CardContent className="p-5 sm:p-7 lg:p-8">
