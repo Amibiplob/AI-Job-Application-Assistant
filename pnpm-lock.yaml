@@ -184,6 +184,9 @@ importers:
       dotenv:
         specifier: ^18.0.5
         version: 18.0.5
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
       lucide-react:
         specifier: ^1.52.0
         version: 1.52.0(@types/react@19.3.0)(react@19.2.8)
