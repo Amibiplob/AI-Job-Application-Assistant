@@ -2,6 +2,7 @@ import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 
 import { getJobById, listJobs } from "@/lib/jobs";
 import { registerJobTools } from "@/lib/mcp/register-job-tools";
+import { registerJobAnalysisTool } from "@/lib/mcp/register-job-analysis-tool";
 import {
   getRemoteMcpAuthConfig,
   getRemoteMcpBearerGate,
@@ -16,8 +17,9 @@ const mcpHandler = createMcpHandler(() => {
   });
 
   registerJobTools(server, { getJobById, listJobs });
+  registerJobAnalysisTool(server);
   return server;
-});
+}, { maxRequestBodySize: 256 * 1024 });
 
 async function handleRequest(request: Request): Promise<Response> {
   const config = getRemoteMcpAuthConfig();

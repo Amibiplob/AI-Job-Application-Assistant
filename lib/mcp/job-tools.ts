@@ -1,9 +1,17 @@
 import { z } from "zod";
 
+// @ts-expect-error Explicit extension lets Node's built-in TypeScript test runner resolve this module.
+import { analyzeJobDescriptionAgainstResume } from "../job-matching.ts";
 import type { Job, ListJobsOptions, WorkplaceType } from "../jobs";
 
 export const MAX_SEARCH_RESULTS = 25;
 export const DEFAULT_SEARCH_RESULTS = 10;
+export const MAX_ANALYSIS_TEXT_LENGTH = 20_000;
+
+export const analyzeJobMatchInputSchema = z.object({
+  resumeText: z.string().max(MAX_ANALYSIS_TEXT_LENGTH).trim().min(1),
+  jobDescription: z.string().max(MAX_ANALYSIS_TEXT_LENGTH).trim().min(1),
+}).strict();
 
 export const searchJobsInputSchema = z.object({
   keywords: z.string().trim().min(1).max(200),
@@ -114,6 +122,29 @@ export function createJobToolLogic(dependencies: JobToolDependencies) {
       const job = await dependencies.getJobById(args.jobId);
 
       return job ? { job: serializeJobDetails(job) } : { job: null };
+    },
+  };
+}
+
+/** Analyze only caller-supplied text. This function has no database or auth dependencies. */
+export function createJobMatchToolLogic() {
+  return {
+    analyzeJobMatch(input: unknown) {
+      const parsed = analyzeJobMatchInputSchema.safeParse(input);
+      if (!parsed.success) {
+        // Keep submitted text and validator input details out of tool error messages.
+        throw new Error("Invalid analysis input. Provide nonblank text in both fields, each no longer than 20,000 characters.");
+      }
+
+      const analysis = analyzeJobDescriptionAgainstResume(
+        parsed.data.resumeText,
+        parsed.data.jobDescription,
+      );
+
+      return {
+        ...analysis,
+        scoreDescription: "A skills-text-overlap heuristic, not a hiring probability.",
+      };
     },
   };
 }

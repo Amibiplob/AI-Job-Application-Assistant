@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  analyzeJobMatchInputSchema,
   createJobToolLogic,
+  createJobMatchToolLogic,
   getJobDetailsInputSchema,
+  MAX_ANALYSIS_TEXT_LENGTH,
   MAX_SEARCH_RESULTS,
   searchJobsInputSchema,
   serializeJobDetails,
   serializeJobSummary,
 } from "../lib/mcp/job-tools.ts";
+import { analyzeJobDescriptionAgainstResume } from "../lib/job-matching.ts";
 
 const job = {
   id: "497f6eca-6276-4993-bfeb-53cbbbba6f08",
@@ -136,4 +140,78 @@ test("returns a clean null result for a missing job", async () => {
 
   assert.deepEqual(await logic.getJobDetails({ jobId: job.id }), { job: null });
   assert.equal(requestedId, job.id);
+});
+
+test("validates caller-supplied analysis fields and rejects unexpected properties", () => {
+  const valid = { resumeText: "Resume", jobDescription: "Job" };
+  assert.equal(analyzeJobMatchInputSchema.safeParse(valid).success, true);
+  assert.equal(analyzeJobMatchInputSchema.safeParse({ jobDescription: "Job" }).success, false);
+  assert.equal(analyzeJobMatchInputSchema.safeParse({ resumeText: "Resume" }).success, false);
+  assert.equal(analyzeJobMatchInputSchema.safeParse({ ...valid, extra: "value" }).success, false);
+  assert.equal(analyzeJobMatchInputSchema.safeParse({ resumeText: "", jobDescription: "Job" }).success, false);
+  assert.equal(analyzeJobMatchInputSchema.safeParse({ resumeText: " \n ", jobDescription: "Job" }).success, false);
+  assert.equal(analyzeJobMatchInputSchema.safeParse({ resumeText: "Resume", jobDescription: " \t " }).success, false);
+});
+
+test("accepts the 20,000 character boundary and rejects larger inputs", () => {
+  const valid = { resumeText: "r".repeat(MAX_ANALYSIS_TEXT_LENGTH), jobDescription: "Job" };
+  assert.equal(analyzeJobMatchInputSchema.safeParse(valid).success, true);
+  assert.equal(
+    analyzeJobMatchInputSchema.safeParse({ ...valid, resumeText: `${valid.resumeText}r` }).success,
+    false,
+  );
+  assert.equal(
+    analyzeJobMatchInputSchema.safeParse({ resumeText: "Resume", jobDescription: "j".repeat(MAX_ANALYSIS_TEXT_LENGTH) }).success,
+    true,
+  );
+  assert.equal(
+    analyzeJobMatchInputSchema.safeParse({ resumeText: "Resume", jobDescription: "j".repeat(MAX_ANALYSIS_TEXT_LENGTH + 1) }).success,
+    false,
+  );
+});
+
+test("analysis output matches the website matcher and never echoes supplied text", () => {
+  const resumeText = "Private resume: TypeScript, React, and PostgreSQL.";
+  const jobDescription = "Confidential posting seeks React, TypeScript, and AWS.";
+  const result = createJobMatchToolLogic().analyzeJobMatch({ resumeText, jobDescription });
+  const websiteResult = analyzeJobDescriptionAgainstResume(resumeText, jobDescription);
+
+  assert.deepEqual(
+    {
+      score: result.score,
+      matchingSkills: result.matchingSkills,
+      skillsNotDetected: result.skillsNotDetected,
+      explanation: result.explanation,
+      nextStep: result.nextStep,
+    },
+    websiteResult,
+  );
+  assert.match(result.scoreDescription, /heuristic, not a hiring probability/i);
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes(resumeText), false);
+  assert.equal(serialized.includes(jobDescription), false);
+  assert.equal(serialized.includes("Private resume"), false);
+  assert.equal(serialized.includes("Confidential posting"), false);
+});
+
+test("returns a nullable score when the description has no recognized skills", () => {
+  const result = createJobMatchToolLogic().analyzeJobMatch({
+    resumeText: "Experienced professional",
+    jobDescription: "Seeking a motivated and collaborative teammate.",
+  });
+  assert.equal(result.score, null);
+  assert.deepEqual(result.matchingSkills, []);
+  assert.deepEqual(result.skillsNotDetected, []);
+  assert.match(result.explanation, /no skill overlap to score/i);
+});
+
+test("invalid analysis errors do not include submitted text", () => {
+  const secretLookingInput = "user supplied private string";
+  assert.throws(
+    () => createJobMatchToolLogic().analyzeJobMatch({ resumeText: " ", jobDescription: secretLookingInput }),
+    (error) => {
+      assert.doesNotMatch(error.message, /user supplied private string/);
+      return true;
+    },
+  );
 });
