@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getCurrentUser } from "@/lib/auth";
 import {
   ArrowRight,
   BriefcaseBusiness,
@@ -28,7 +29,12 @@ const steps = [
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#4F46E5]";
 const primaryButton = "h-12 rounded-xl bg-[#4F46E5] px-5 text-sm text-white hover:bg-[#4338CA] focus-visible:border-[#4F46E5] focus-visible:ring-[#4F46E5]/30 motion-reduce:transition-none motion-reduce:transform-none";
 
-export default function Home() {
+export default async function Home() {
+  const currentUser = await getCurrentUser();
+  const workspaceHref = currentUser ? "/dashboard" : "/signup";
+  const accountHref = currentUser ? "/dashboard" : "/login";
+  const accountLabel = currentUser ? "Your workspace" : "Sign in";
+  const startLabel = currentUser ? "Go to Dashboard" : "Get started";
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 selection:bg-indigo-100 selection:text-indigo-950">
       <a href="#main-content" className={`sr-only z-50 rounded-lg bg-white p-3 text-sm font-medium focus:not-sr-only focus:fixed focus:left-4 focus:top-4 ${focus}`}>
@@ -45,8 +51,8 @@ export default function Home() {
           </Link>
           <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:gap-6">
             <a href="#features" className={`inline-flex min-h-11 items-center rounded-md text-sm font-medium text-slate-600 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>Features</a>
-            <Link href="/login" className={`inline-flex min-h-11 items-center rounded-md text-sm font-medium text-slate-600 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>Sign in</Link>
-            <Link href="/signup" className={cn(buttonVariants(), primaryButton, "h-11 px-4")}>Get started <ArrowRight aria-hidden="true" /></Link>
+            <Link href={accountHref} className={`inline-flex min-h-11 items-center rounded-md text-sm font-medium text-slate-600 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>{accountLabel}</Link>
+            <Link href={workspaceHref} className={cn(buttonVariants(), primaryButton, "h-11 px-4")}>{startLabel} <ArrowRight aria-hidden="true" /></Link>
           </div>
         </nav>
       </header>
@@ -58,7 +64,7 @@ export default function Home() {
             <h1 id="hero-heading" className="max-w-xl text-[clamp(2.5rem,5vw,4.25rem)] font-semibold leading-[1.08] tracking-[-0.055em]">Less scattered searching.<br /><span className="text-[#4F46E5]">More clarity on your next role.</span></h1>
             <p className="mt-6 max-w-lg text-base leading-7 text-slate-600 sm:text-lg sm:leading-8">Bring your resume, job comparisons, and applications into one focused workspace. Understand the requirements before you decide what comes next.</p>
             <div className="mt-8 flex flex-col gap-3 min-[400px]:flex-row">
-              <Link href="/signup" className={cn(buttonVariants(), primaryButton)}>Create your workspace <ArrowRight aria-hidden="true" /></Link>
+              <Link href={workspaceHref} className={cn(buttonVariants(), primaryButton)}>{currentUser ? "Go to Dashboard" : "Create your workspace"} <ArrowRight aria-hidden="true" /></Link>
               <a href="#how-it-works" className={`inline-flex min-h-12 items-center justify-center rounded-xl px-4 text-sm font-medium text-slate-700 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>See how it works</a>
             </div>
             <p className="mt-5 text-sm text-slate-500">Your experience. Your decisions. One place to stay organized.</p>
@@ -132,7 +138,7 @@ export default function Home() {
         <section aria-labelledby="cta-heading" className="border-y border-indigo-100 bg-indigo-50/60">
           <div className="mx-auto flex max-w-7xl flex-col justify-between gap-7 px-4 py-14 sm:px-8 md:flex-row md:items-center lg:px-12">
             <div><h2 id="cta-heading" className="text-3xl font-semibold tracking-[-0.04em]">Give your next move a clear starting point.</h2><p className="mt-3 max-w-xl text-sm leading-6 text-slate-600">Save your resume, compare opportunities, and bring your applications together.</p></div>
-            <Link href="/signup" className={cn(buttonVariants(), primaryButton, "shrink-0 md:w-auto")}>Get started <ArrowRight aria-hidden="true" /></Link>
+            <Link href={workspaceHref} className={cn(buttonVariants(), primaryButton, "shrink-0 md:w-auto")}>{startLabel} <ArrowRight aria-hidden="true" /></Link>
           </div>
         </section>
       </main>
@@ -140,7 +146,7 @@ export default function Home() {
       <footer className="mx-auto flex w-full max-w-7xl flex-col justify-between gap-4 px-4 py-7 sm:flex-row sm:items-center sm:px-8 lg:px-12">
         <p className="text-xs font-medium text-slate-600">AI Job Application Assistant</p>
         <p className="text-xs text-slate-500">A more organized search. A more considered next step.</p>
-        <Link href="/login" className={`inline-flex min-h-11 w-fit items-center rounded-md text-sm font-medium text-slate-600 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>Sign in</Link>
+        <Link href={accountHref} className={`inline-flex min-h-11 w-fit items-center rounded-md text-sm font-medium text-slate-600 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>{accountLabel}</Link>
       </footer>
     </div>
   );

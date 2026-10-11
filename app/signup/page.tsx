@@ -1,8 +1,14 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getCurrentUser } from "@/lib/auth";
 import { BriefcaseBusiness } from "lucide-react";
 import { SignupForm } from "./signup-form";
 
-export default function SignupPage() {
+export default async function SignupPage() {
+  if (await getCurrentUser()) {
+    redirect("/dashboard");
+  }
+
   return (
     <main className="flex min-h-screen flex-col bg-[#fafaf8] text-[#20241f]">
       <header className="mx-auto flex h-[76px] w-full max-w-7xl items-center px-5 sm:px-8 lg:px-12">
