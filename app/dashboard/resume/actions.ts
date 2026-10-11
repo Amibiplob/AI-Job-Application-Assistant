@@ -1,11 +1,14 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { createResume, updateResume } from "@/lib/resumes";
 
 type ResumeField = "name" | "content";
 
+export type SavedResume = { id: string; name: string; content: string };
+
 export type ResumeFormState = {
+  saved?: SavedResume;
   errors?: Partial<Record<ResumeField, string>>;
   message?: string;
   values?: {
@@ -40,14 +43,16 @@ export async function saveResume(
     return { errors, values: { name, content } };
   }
 
+  let saved;
   try {
     if (resumeId) {
       const updatedResume = await updateResume(resumeId, name, content);
       if (!updatedResume) {
-        return { message: "We couldn't find that resume. Refresh the page and try again." };
+        return { message: "We couldn't find that resume. Refresh the page and try again.", values: { name, content } };
       }
+      saved = updatedResume;
     } else {
-      await createResume(name, content);
+      saved = await createResume(name, content);
     }
   } catch {
     return {
@@ -56,5 +61,7 @@ export async function saveResume(
     };
   }
 
-  redirect("/dashboard/resume");
+  revalidatePath("/dashboard/resume");
+  revalidatePath("/dashboard");
+  return { saved: { id: saved.id, name: saved.name, content: saved.content } };
 }
