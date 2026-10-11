@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 import { ScanText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { InlineFeedback } from "@/components/presentation/inline-feedback";
+import { useAnalysisDraft } from "@/components/jobs/analysis-draft";
 import { AnalysisResults } from "@/components/jobs/analysis-results";
 import { JOB_DESCRIPTION_LIMITS, type JobDescriptionInput } from "@/lib/job-matching";
 import { analyzeJobDescription, type AnalyzeJobDescriptionState } from "./actions";
@@ -16,7 +17,7 @@ const initialState: AnalyzeJobDescriptionState = { status: "idle" };
 
 export function AnalyzeForm() {
   const [state, formAction, pending] = useActionState(analyzeJobDescription, initialState);
-  const [draft, setDraft] = useState<JobDescriptionInput>({ title: "", company: "", description: "" });
+  const [draft, setDraft] = useAnalysisDraft();
   const form = useRef<HTMLFormElement>(null);
   const result = useRef<HTMLDivElement>(null);
   const hasDraft = Boolean(draft.title || draft.company || draft.description);
@@ -34,11 +35,12 @@ export function AnalyzeForm() {
       const url = new URL(anchor.href, window.location.href);
       if (url.pathname === window.location.pathname && url.search === window.location.search) return;
       if (!window.confirm("Leave this analysis? Your pasted job details are not saved.")) { event.preventDefault(); event.stopPropagation(); }
+      else setDraft({ title: "", company: "", description: "" });
     };
     window.addEventListener("beforeunload", beforeUnload);
     document.addEventListener("click", beforeNavigate, true);
     return () => { window.removeEventListener("beforeunload", beforeUnload); document.removeEventListener("click", beforeNavigate, true); };
-  }, [hasDraft]);
+  }, [hasDraft, setDraft]);
   const update = (field: keyof JobDescriptionInput, value: string) => setDraft(previous => ({ ...previous, [field]: value }));
   return (
     <div className="grid min-w-0 items-start gap-6 xl:grid-cols-2">
@@ -56,7 +58,7 @@ export function AnalyzeForm() {
             <Button type="submit" disabled={pending} className="h-auto min-h-11 max-w-full whitespace-normal">{pending ? "Analyzing…" : "Analyze against my resume"}</Button>
           </fieldset>
           {pending && <p role="status" className="mt-4 text-sm text-text-secondary">Comparing recognized skills with your saved resume…</p>}
-          <p className="mt-4 text-xs leading-5 text-text-secondary">Pasted details remain in this form after analysis. Leaving or refreshing this page discards them.</p>
+          <p className="mt-4 text-xs leading-5 text-text-secondary">Pasted details remain in this form after analysis. Back/Forward within your workspace keeps this draft. Confirming the leave prompt, refreshing, or logging out discards it.</p>
         </form>
       </CardContent></Card>
       <div className="min-w-0 space-y-6">

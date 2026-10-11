@@ -22,7 +22,7 @@ export default async function LoginPage() {
 
       <section className="flex flex-1 items-center justify-center px-5 py-10 sm:px-8">
         <div className="w-full max-w-md rounded-2xl border border-[#e3e6e0] bg-white p-6 shadow-[0_20px_60px_-40px_rgba(35,55,42,0.3)] sm:p-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#718675]">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-text-secondary">
             Welcome back
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-[-0.05em]">Sign in</h1>

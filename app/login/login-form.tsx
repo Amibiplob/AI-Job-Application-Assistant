@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { login, type LoginState } from "./actions";
@@ -9,6 +9,7 @@ const initialState: LoginState = {};
 
 export function LoginForm() {
   const [state, formAction, pending] = useActionState(login, initialState);
+  const [email, setEmail] = useState("");
 
   return (
     <form action={formAction} className="mt-7 space-y-5" noValidate>
@@ -24,10 +25,11 @@ export function LoginForm() {
           placeholder="you@example.com"
           maxLength={254}
           required
-          defaultValue={state.email}
+          value={email}
+          onChange={event => setEmail(event.target.value)}
           aria-invalid={Boolean(state.errors?.email)}
           aria-describedby={state.errors?.email ? "email-error" : undefined}
-          className="h-11 rounded-lg border-[#dfe4dc] bg-white px-3"
+          className="h-11 rounded-lg border-input bg-white px-3"
         />
         {state.errors?.email && (
           <p id="email-error" className="text-sm text-red-700">
@@ -49,7 +51,7 @@ export function LoginForm() {
           required
           aria-invalid={Boolean(state.errors?.password)}
           aria-describedby={state.errors?.password ? "password-error" : undefined}
-          className="h-11 rounded-lg border-[#dfe4dc] bg-white px-3"
+          className="h-11 rounded-lg border-input bg-white px-3"
         />
         {state.errors?.password && (
           <p id="password-error" className="text-sm text-red-700">
