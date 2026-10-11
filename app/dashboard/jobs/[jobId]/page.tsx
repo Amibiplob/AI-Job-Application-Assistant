@@ -6,24 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
 import { getApplicationForJob } from "@/lib/applications";
-import { getJobById, type Job } from "@/lib/jobs";
+import { getJobById } from "@/lib/jobs";
 import { ApplicationControl } from "./application-control";
 import { JobMatcher } from "./job-matcher";
-
-function formatSalary(job: Job): string | null {
-  if (job.salaryMin === null && job.salaryMax === null) return null;
-  const currency = job.salaryCurrency ?? "USD";
-  const formatAmount = (amount: string) => {
-    const number = Number(amount);
-    return Number.isFinite(number)
-      ? new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format(number)
-      : amount;
-  };
-  const range = job.salaryMin !== null && job.salaryMax !== null
-    ? `${formatAmount(job.salaryMin)} – ${formatAmount(job.salaryMax)}`
-    : formatAmount(job.salaryMin ?? job.salaryMax ?? "");
-  return `${range}${job.salaryPeriod ? ` / ${job.salaryPeriod.toLowerCase()}` : ""}`;
-}
+import { formatSalary } from "@/components/jobs/search-presentation";
+import { JobSourceBadge } from "@/components/presentation/job-source-badge";
 
 function safeExternalUrl(value: string | null): string | null {
   if (!value) return null;
@@ -85,7 +72,7 @@ export default async function JobDetailsPage({ params }: { params: Promise<{ job
                 {job.employmentType && <Badge variant="outline" className="h-7 border-[#e3e8e1] px-2.5 text-xs text-[#59685a]">{job.employmentType}</Badge>}
                 {salary && <Badge variant="secondary" className="h-7 border-0 bg-[#edf2ec] px-2.5 text-xs text-[#47604b]">{salary}</Badge>}
                 {posted && <Badge variant="outline" className="h-7 gap-1.5 border-[#e3e8e1] px-2.5 text-xs text-[#737c72]"><CalendarDays size={13} aria-hidden="true" />Posted {posted}</Badge>}
-                <Badge variant="outline" className="h-7 border-[#e3e8e1] px-2.5 text-xs text-[#737c72]">Source: {job.source}</Badge>
+                <JobSourceBadge source={job.source} />
               </div>
             </CardContent>
           </Card>

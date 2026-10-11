@@ -1,178 +1,96 @@
 import Link from "next/link";
-import { BriefcaseBusiness, ChevronLeft, ChevronRight, MapPin, Search } from "lucide-react";
+import { BriefcaseBusiness, ChevronLeft, ChevronRight, MapPin, Search, ArrowUpRight } from "lucide-react";
 import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/presentation/page-header";
+import { EmptyState } from "@/components/presentation/empty-state";
+import { InlineFeedback } from "@/components/presentation/inline-feedback";
+import { JobSourceBadge } from "@/components/presentation/job-source-badge";
+import { PAGE_SIZE, workplaceTypes, readJobFilters, pageHref, formatSalary, formatPostedDate, type JobSearchParams } from "@/components/jobs/search-presentation";
 import { getCurrentUser } from "@/lib/auth";
-import { listJobs, type Job, type WorkplaceType } from "@/lib/jobs";
+import { listJobs, type Job } from "@/lib/jobs";
+import { cn } from "@/lib/utils";
 
-const PAGE_SIZE = 10;
-const workplaceTypes: { value: WorkplaceType; label: string }[] = [
-  { value: "REMOTE", label: "Remote" },
-  { value: "HYBRID", label: "Hybrid" },
-  { value: "ONSITE", label: "Onsite" },
-];
-
-type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
-
-function single(value: string | string[] | undefined): string {
-  return typeof value === "string" ? value : "";
-}
-
-function formatSalary(job: Job): string | null {
-  if (job.salaryMin === null && job.salaryMax === null) return null;
-  const currency = job.salaryCurrency ?? "USD";
-  const format = (amount: string) => {
-    const number = Number(amount);
-    return Number.isFinite(number)
-      ? new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format(number)
-      : amount;
-  };
-  const range = job.salaryMin !== null && job.salaryMax !== null
-    ? `${format(job.salaryMin)} – ${format(job.salaryMax)}`
-    : format(job.salaryMin ?? job.salaryMax ?? "");
-  return `${range}${job.salaryPeriod ? ` / ${job.salaryPeriod.toLowerCase()}` : ""}`;
-}
-
-function formatDate(date: Date | null): string | null {
-  if (!date) return null;
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date);
-}
-
-function pageHref(page: number, search: string, workplace: string): string {
-  const params = new URLSearchParams();
-  if (search) params.set("q", search);
-  if (workplace) params.set("workplace", workplace);
-  params.set("page", String(page));
-  return `/dashboard/jobs?${params.toString()}`;
-}
-
-export default async function JobsPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function JobsPage({ searchParams }: { searchParams: Promise<JobSearchParams> }) {
   const currentUser = await getCurrentUser();
   if (!currentUser) redirect("/login");
-
-  const params = await searchParams;
-  const search = single(params.q).trim().slice(0, 100);
-  const requestedWorkplace = single(params.workplace).toUpperCase();
-  const workplace = workplaceTypes.some(({ value }) => value === requestedWorkplace)
-    ? requestedWorkplace as WorkplaceType
-    : "";
-  const requestedPage = Number.parseInt(single(params.page), 10);
-  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0
-    ? Math.min(requestedPage, 100_000)
-    : 1;
-
+  const { search, workplace, page } = readJobFilters(await searchParams);
   let jobs: Job[] = [];
   let hasMore = false;
   let failed = false;
   try {
-    const results = await listJobs({
-      limit: PAGE_SIZE + 1,
-      offset: (page - 1) * PAGE_SIZE,
-      search: search || null,
-      workplaceType: workplace || null,
-    });
+    const results = await listJobs({ limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE, search: search || null, workplaceType: workplace || null });
     hasMore = results.length > PAGE_SIZE;
     jobs = results.slice(0, PAGE_SIZE);
   } catch {
     failed = true;
   }
-
-  const start = jobs.length ? (page - 1) * PAGE_SIZE + 1 : 0;
+  // Redirect outside the catch: Next.js redirects terminate rendering by throwing.
+  if (!failed && !jobs.length && page > 1) redirect(pageHref(1, search, workplace));
+  const start = (page - 1) * PAGE_SIZE + 1;
   const end = (page - 1) * PAGE_SIZE + jobs.length;
+  const filtered = Boolean(search || workplace);
 
   return (
-    <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
-          <div>
-            <p className="text-xs font-medium text-[#818980]">EXPLORE OPPORTUNITIES</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.05em] sm:text-[34px]">Find your next role</h1>
-            <p className="mt-2 text-sm text-[#747c73]">Browse jobs and narrow the list to what works for you.</p>
-          </div>
-
-          <form action="/dashboard/jobs" method="get" className="mt-7 rounded-xl bg-white p-4 ring-1 ring-[#e8ebe6] sm:p-5">
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px_auto] sm:items-end">
-              <div className="space-y-2">
-                <label htmlFor="job-search" className="text-xs font-medium text-[#566057]">Job title or company</label>
-                <div className="relative">
-                  <Search size={16} aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 text-[#92998f]" />
-                  <Input id="job-search" name="q" type="search" defaultValue={search} placeholder="Try “designer” or a company" className="h-10 rounded-lg border-[#dfe4dc] pl-9 text-sm" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label htmlFor="workplace" className="text-xs font-medium text-[#566057]">Workplace</label>
-                <select id="workplace" name="workplace" defaultValue={workplace} className="h-10 w-full rounded-lg border border-[#dfe4dc] bg-white px-3 text-sm text-[#344039] outline-none focus-visible:ring-3 focus-visible:ring-[#91a894]/40">
-                  <option value="">Any workplace</option>
-                  {workplaceTypes.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </div>
-              <Button type="submit" className="h-10 rounded-lg bg-[#203c32] px-5 text-sm text-white hover:bg-[#2d5143]">Search jobs</Button>
+    <div className="mx-auto max-w-6xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
+      <PageHeader eyebrow="Explore opportunities" title="Find your next role" description="Search listings by title or company, review the details, and decide which opportunities deserve a closer look." />
+      <Card className="mt-8 gap-0 py-0 shadow-subtle">
+        <CardContent className="p-5 sm:p-6">
+          <form key={`${search}:${workplace}`} action="/dashboard/jobs" method="get" aria-label="Search jobs" className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_180px_auto] md:items-end">
+            <div className="min-w-0 space-y-2">
+              <label htmlFor="job-search" className="text-sm font-medium">Job title or company</label>
+              <div className="relative"><Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" /><Input id="job-search" name="q" type="search" maxLength={100} defaultValue={search} placeholder="Title or company name" className="h-11 w-full min-w-0 pl-10" /></div>
             </div>
-            {page > 1 && <input type="hidden" name="page" value="1" />}
+            <div className="min-w-0 space-y-2">
+              <label htmlFor="workplace" className="text-sm font-medium">Workplace</label>
+              <select id="workplace" name="workplace" defaultValue={workplace} className="h-11 w-full rounded-lg border border-input bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+                <option value="">Any workplace</option>
+                {workplaceTypes.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </div>
+            <Button type="submit" className="h-11">Search jobs</Button>
           </form>
-
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-[#727a71]">{failed ? "Job results are unavailable" : jobs.length ? `Showing ${start}–${end} jobs` : "No jobs to show"}</p>
-            {workplace && <Badge variant="secondary" className="border-0 bg-[#edf2ec] text-[#55705a]">{workplace[0] + workplace.slice(1).toLowerCase()}</Badge>}
-          </div>
-
-          {failed ? (
-            <Card role="alert" className="mt-4 rounded-xl border-0 bg-white py-0 shadow-none ring-1 ring-[#e8ebe6]">
-              <CardContent className="p-8 text-center sm:p-12">
-                <p className="font-semibold">We couldn’t load jobs right now</p>
-                <p className="mt-2 text-sm text-[#747c73]">Please try again in a moment.</p>
-                <Button render={<Link href={pageHref(page, search, workplace)} />} variant="outline" className="mt-5 rounded-lg border-[#dfe4dc]">Try again</Button>
-              </CardContent>
-            </Card>
-          ) : jobs.length === 0 ? (
-            <Card className="mt-4 rounded-xl border-0 bg-white py-0 shadow-none ring-1 ring-[#e8ebe6]">
-              <CardContent className="flex flex-col items-center p-8 text-center sm:p-12">
-                <span className="flex size-12 items-center justify-center rounded-xl bg-[#f1f4ef] text-[#66806a]"><BriefcaseBusiness size={21} aria-hidden="true" /></span>
-                <h2 className="mt-4 font-semibold">{search || workplace ? "No matching jobs" : "No jobs available yet"}</h2>
-                <p className="mt-2 max-w-md text-sm leading-6 text-[#747c73]">{search || workplace ? "Try a different title, company, or workplace filter." : "Check back later for new opportunities."}</p>
-                {(search || workplace) && <Button render={<Link href="/dashboard/jobs" />} variant="outline" className="mt-5 rounded-lg border-[#dfe4dc]">Clear filters</Button>}
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="mt-4 grid gap-3">
-              {jobs.map((job) => {
-                const salary = formatSalary(job);
-                const posted = formatDate(job.postedAt);
-                return (
-                  <Card key={job.id} className="gap-0 rounded-xl border-0 bg-white py-0 shadow-none ring-1 ring-[#e8ebe6]">
-                    <CardContent className="p-4 sm:p-5">
-                      <div className="flex items-start gap-3.5">
-                        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#eef2e9] text-[#4c684f]"><BriefcaseBusiness size={17} aria-hidden="true" /></span>
-                        <div className="min-w-0 flex-1">
-                          <h2 className="break-words font-semibold tracking-[-0.02em]"><Link href={`/dashboard/jobs/${job.id}`} className="rounded-sm hover:text-[#4c6b52] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#66806a]">{job.title}</Link></h2>
-                          <p className="mt-1 text-sm text-[#5e685f]">{job.company}</p>
-                          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[#737c72]">
-                            {job.location && <span className="inline-flex items-center gap-1"><MapPin size={13} aria-hidden="true" />{job.location}</span>}
-                            {job.workplaceType && <Badge variant="outline" className="h-6 border-[#e3e8e1] px-2 text-[11px] text-[#59685a]">{job.workplaceType[0] + job.workplaceType.slice(1).toLowerCase()}</Badge>}
-                            {job.employmentType && <span>{job.employmentType}</span>}
-                            {salary && <span className="font-medium text-[#425c46]">{salary}</span>}
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[#8b9289]">
-                            {posted && <span>Posted {posted}</span>}
-                            <span>Source: {job.source}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-
-          {!failed && jobs.length > 0 && <nav aria-label="Jobs pages" className="mt-6 flex items-center justify-between border-t border-[#e8ebe6] pt-4">
-            <p className="text-xs text-[#818980]">Page {page}</p>
-            <div className="flex gap-2">
-              {page > 1 && <Button render={<Link href={pageHref(page - 1, search, workplace)} />} variant="outline" className="h-9 rounded-lg border-[#dfe4dc] px-3 text-xs"><ChevronLeft size={14} aria-hidden="true" />Previous</Button>}
-              {hasMore && <Button render={<Link href={pageHref(page + 1, search, workplace)} />} variant="outline" className="h-9 rounded-lg border-[#dfe4dc] px-3 text-xs">Next<ChevronRight size={14} aria-hidden="true" /></Button>}
-            </div>
-          </nav>}
+          {filtered && <Link href="/dashboard/jobs" className="mt-4 inline-flex rounded-md text-sm font-medium text-brand underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus">Clear filters</Link>}
+        </CardContent>
+      </Card>
+      <InlineFeedback tone="info" announcement="off" className="mt-5">Demo listings are sample data, not active openings. Other listings are unverified; confirm vacancy details with the employer before applying.</InlineFeedback>
+      <section aria-labelledby="job-results-heading" className="mt-8 min-w-0">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div><h2 id="job-results-heading" className="text-lg font-semibold">Job results</h2><p className="mt-1 text-sm text-text-secondary">{failed ? "Results are unavailable" : jobs.length ? `Showing ${start}–${end} listings` : "No listings to show"}</p></div>
+          {workplace && <Badge variant="secondary">{workplaceTypes.find(item => item.value === workplace)?.label}</Badge>}
+        </div>
+        {failed ? <InlineFeedback tone="error" title="We couldn’t load jobs right now">Your search filters are still applied. <a href={pageHref(page, search, workplace)} className="rounded-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">Reload these results</a> to try again.</InlineFeedback> : !jobs.length ? <EmptyState headingLevel={3} icon={Search} title={filtered ? "No matching listings" : "No listings available yet"} description={filtered ? "Try a different title, company, or workplace filter. Search checks job titles and company names." : "There are no listings to browse right now. Check back later."} actions={filtered ? <Link href="/dashboard/jobs" className={buttonVariants({ variant: "outline" })}>Clear filters</Link> : undefined} /> : (
+          <ul className="grid min-w-0 gap-4">
+            {jobs.map(job => {
+              const salary = formatSalary(job);
+              const posted = formatPostedDate(job.postedAt);
+              return <li key={job.id} className="min-w-0"><Card className="gap-0 py-0 shadow-subtle"><CardContent className="p-5 sm:p-6">
+                <article className="min-w-0">
+                  <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-subtle text-brand-foreground"><BriefcaseBusiness size={19} aria-hidden="true" /></span>
+                    <div className="min-w-0 flex-1"><p className="break-words text-sm text-text-secondary">{job.company}</p><h3 className="mt-1 break-words text-lg font-semibold tracking-tight"><Link href={`/dashboard/jobs/${job.id}`} className="rounded-sm hover:text-brand hover:underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">{job.title}</Link></h3></div>
+                  </div>
+                  <div className="mt-4"><JobSourceBadge source={job.source} /></div>
+                  <dl className="mt-5 grid min-w-0 gap-x-5 gap-y-4 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="min-w-0"><dt className="text-xs text-text-secondary">Location</dt><dd className="mt-1 flex items-start gap-1.5 break-words"><MapPin aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-text-secondary" /><span className="min-w-0 break-words">{job.location || "Not provided"}</span></dd></div>
+                    <div className="min-w-0"><dt className="text-xs text-text-secondary">Workplace</dt><dd className="mt-1">{workplaceTypes.find(item => item.value === job.workplaceType)?.label ?? "Not provided"}</dd></div>
+                    <div className="min-w-0"><dt className="text-xs text-text-secondary">Employment</dt><dd className="mt-1 break-words">{job.employmentType || "Not provided"}</dd></div>
+                    <div className="min-w-0"><dt className="text-xs text-text-secondary">Salary</dt><dd className="mt-1 break-words">{salary ?? "Not available"}</dd></div>
+                  </dl>
+                  <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                    <p className="text-xs text-text-secondary">{posted ? <>Posted <time dateTime={job.postedAt!.toISOString()}>{posted}</time></> : "Posting date not provided"}</p>
+                    <Link href={`/dashboard/jobs/${job.id}`} aria-label={`View details for ${job.title} at ${job.company}`} className={cn(buttonVariants({ variant: "outline" }), "max-w-full")}>View details<ArrowUpRight aria-hidden="true" /></Link>
+                  </div>
+                </article>
+              </CardContent></Card></li>;
+            })}
+          </ul>
+        )}
+      </section>
+      {!failed && jobs.length > 0 && <nav aria-label="Jobs pages" className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5"><p className="text-sm text-text-secondary">Page {page}</p><div className="flex flex-wrap gap-2">{page > 1 && <Link href={pageHref(page - 1, search, workplace)} className={buttonVariants({ variant: "outline" })}><ChevronLeft aria-hidden="true" />Previous</Link>}{hasMore && page < 100_000 && <Link href={pageHref(page + 1, search, workplace)} className={buttonVariants({ variant: "outline" })}>Next<ChevronRight aria-hidden="true" /></Link>}</div></nav>}
     </div>
   );
 }
