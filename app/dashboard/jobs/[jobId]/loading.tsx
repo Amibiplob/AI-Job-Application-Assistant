@@ -1,0 +1,3 @@
+export default function JobDetailsLoading() {
+  return <div aria-busy="true" aria-label="Loading job details" className="mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:px-10"><p role="status" className="sr-only">Loading job details…</p><div aria-hidden="true" className="animate-pulse space-y-6 motion-reduce:animate-none"><div className="h-8 w-32 rounded bg-surface-muted" /><div className="h-56 rounded-xl border border-border bg-surface" /><div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]"><div className="h-96 rounded-xl border border-border bg-surface" /><div className="h-72 rounded-xl border border-border bg-surface" /></div></div></div>;
+}

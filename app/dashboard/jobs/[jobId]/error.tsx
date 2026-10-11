@@ -1,15 +1,10 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { PageHeader } from "@/components/presentation/page-header";
+import { InlineFeedback } from "@/components/presentation/inline-feedback";
 
 export default function JobDetailsError({ retry }: { error: Error & { digest?: string }; retry: () => void }) {
-  return (
-    <div className="flex min-h-[50vh] items-center justify-center bg-[#f7f8f6] px-5 text-[#20241f]">
-      <div role="alert" className="w-full max-w-md rounded-xl bg-white p-7 text-center ring-1 ring-[#e8ebe6] sm:p-9">
-        <h1 className="text-xl font-semibold tracking-[-0.03em]">We couldn’t load this job</h1>
-        <p className="mt-2 text-sm leading-6 text-[#747c73]">Something went wrong while loading the job details. Please try again.</p>
-        <Button type="button" onClick={retry} className="mt-5 h-10 rounded-lg bg-[#203c32] px-4 text-sm text-white hover:bg-[#2d5143]">Try again</Button>
-      </div>
-    </div>
-  );
+  return <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:px-10"><PageHeader title="We couldn’t load this job" description="Job details or your tracking information could not be loaded." /><InlineFeedback tone="error" className="mt-6">Try again in a moment, or return to the job search. No tracking changes were made by loading this page.</InlineFeedback><div className="mt-6 flex flex-wrap gap-3"><Button type="button" onClick={retry}>Try again</Button><Link href="/dashboard/jobs" className={buttonVariants({ variant: "outline" })}>Back to jobs</Link></div></div>;
 }
