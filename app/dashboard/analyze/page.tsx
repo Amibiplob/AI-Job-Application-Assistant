@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
-import { Navbar } from "@/components/layout/navbar";
-import { Sidebar } from "@/components/layout/sidebar";
 import { getCurrentUser } from "@/lib/auth";
 import { getResume } from "@/lib/resumes";
 import { AnalyzeForm } from "./analyze-form";
@@ -14,11 +12,7 @@ export default async function AnalyzeJobPage() {
   const resume = await getResume();
 
   return (
-    <div className="min-h-screen bg-[#f7f8f6] text-[#20241f]">
-      <Sidebar activeHref="/dashboard/analyze" />
-      <div className="min-h-screen lg:pl-[250px]">
-        <Navbar />
-        <main className="mx-auto max-w-[1100px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
+    <div className="mx-auto max-w-[1100px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
           <div className="mb-7">
             <p className="text-xs font-medium text-[#818980]">YOUR JOB SEARCH</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-[-0.05em] sm:text-[34px]">Analyze a job description</h1>
@@ -37,8 +31,6 @@ export default async function AnalyzeJobPage() {
           )}
 
           <AnalyzeForm />
-        </main>
-      </div>
     </div>
   );
 }

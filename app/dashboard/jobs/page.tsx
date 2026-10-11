@@ -5,8 +5,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Navbar } from "@/components/layout/navbar";
-import { Sidebar } from "@/components/layout/sidebar";
 import { getCurrentUser } from "@/lib/auth";
 import { listJobs, type Job, type WorkplaceType } from "@/lib/jobs";
 
@@ -86,11 +84,7 @@ export default async function JobsPage({ searchParams }: { searchParams: SearchP
   const end = (page - 1) * PAGE_SIZE + jobs.length;
 
   return (
-    <div className="min-h-screen bg-[#f7f8f6] text-[#20241f]">
-      <Sidebar activeHref="/dashboard/jobs" />
-      <div className="min-h-screen lg:pl-[250px]">
-        <Navbar />
-        <main className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
+    <div className="mx-auto max-w-[1200px] px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
           <div>
             <p className="text-xs font-medium text-[#818980]">EXPLORE OPPORTUNITIES</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-[-0.05em] sm:text-[34px]">Find your next role</h1>
@@ -179,8 +173,6 @@ export default async function JobsPage({ searchParams }: { searchParams: SearchP
               {hasMore && <Button render={<Link href={pageHref(page + 1, search, workplace)} />} variant="outline" className="h-9 rounded-lg border-[#dfe4dc] px-3 text-xs">Next<ChevronRight size={14} aria-hidden="true" /></Button>}
             </div>
           </nav>}
-        </main>
-      </div>
     </div>
   );
 }

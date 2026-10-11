@@ -4,8 +4,6 @@ import { notFound, redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Navbar } from "@/components/layout/navbar";
-import { Sidebar } from "@/components/layout/sidebar";
 import { getCurrentUser } from "@/lib/auth";
 import { getApplicationForJob } from "@/lib/applications";
 import { getJobById, type Job } from "@/lib/jobs";
@@ -59,11 +57,7 @@ export default async function JobDetailsPage({ params }: { params: Promise<{ job
   const externalUrl = safeExternalUrl(job.jobUrl);
 
   return (
-    <div className="min-h-screen bg-[#f7f8f6] text-[#20241f]">
-      <Sidebar activeHref="/dashboard/jobs" />
-      <div className="min-h-screen lg:pl-[250px]">
-        <Navbar />
-        <main className="mx-auto max-w-[1100px] px-5 py-7 sm:px-8 lg:px-10 lg:py-9">
+    <div className="mx-auto max-w-[1100px] px-5 py-7 sm:px-8 lg:px-10 lg:py-9">
           <Link href="/dashboard/jobs" className="inline-flex items-center gap-1 rounded-sm text-sm font-medium text-[#58715c] hover:text-[#203c32] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#66806a]">
             <ChevronLeft size={16} aria-hidden="true" /> Back to jobs
           </Link>
@@ -110,8 +104,6 @@ export default async function JobDetailsPage({ params }: { params: Promise<{ job
               )}
             </CardContent>
           </Card>
-        </main>
-      </div>
     </div>
   );
 }

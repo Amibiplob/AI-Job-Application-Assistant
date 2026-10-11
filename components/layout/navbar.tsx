@@ -1,23 +1,50 @@
-import Link from "next/link";
-import { Bell, BriefcaseBusiness, ChevronDown } from "lucide-react";
+"use client";
 
-export function Navbar() {
+import type { ReactNode } from "react";
+import { useRef } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { BriefcaseBusiness, ChevronDown, Menu } from "lucide-react";
+import { DashboardNav } from "./dashboard-nav";
+import { dashboardPageTitle } from "./dashboard-navigation";
+
+export function Navbar({ name, email, logoutControl }: { name: string | null; email: string; logoutControl: ReactNode }) {
+  const pathname = usePathname();
+  const menuRef = useRef<HTMLDetailsElement>(null);
+  const identity = name?.trim() || email;
+  const initials = Array.from(identity).slice(0, 2).join("").toUpperCase();
+
   return (
-    <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-[#e8ebe6] bg-white/95 px-5 backdrop-blur sm:px-8">
-      <Link href="/" className="flex items-center gap-2.5 lg:hidden" aria-label="AI Job Assistant home">
-        <span className="flex size-8 items-center justify-center rounded-lg bg-[#203c32] text-white"><BriefcaseBusiness size={16} aria-hidden="true" /></span>
-        <span className="text-sm font-semibold tracking-[-0.03em]">AI Job Assistant</span>
-      </Link>
-      <p className="hidden text-sm text-[#777f76] lg:block">Your workspace <span className="px-2 text-[#c4c9c2]">/</span> Overview</p>
-      <div className="ml-auto flex items-center gap-3">
-        <button aria-label="Notifications" className="relative flex size-9 items-center justify-center rounded-lg text-[#737b72] hover:bg-[#f4f6f3] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#54765d]"><Bell size={18} aria-hidden="true" /><span className="absolute right-2 top-2 size-1.5 rounded-full bg-[#6c8b70]" /></button>
-        <span className="hidden h-7 w-px bg-[#e8ebe6] sm:block" />
-        <button className="flex items-center gap-2 rounded-lg p-1.5 text-left hover:bg-[#f6f7f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#54765d]" aria-label="Account menu, demo profile">
-          <span className="flex size-8 items-center justify-center rounded-full bg-[#e9eee6] text-xs font-semibold text-[#47614b]">JD</span>
-          <span className="hidden text-xs font-medium text-[#424a42] sm:block">Demo profile</span>
-          <ChevronDown size={14} className="hidden text-[#838a82] sm:block" aria-hidden="true" />
-        </button>
+    <header className="sticky top-0 z-20 border-b border-border bg-surface">
+      <div className="flex min-h-20 min-w-0 items-center justify-between gap-3 px-4 sm:px-8 lg:px-10">
+        <div className="flex min-w-0 items-center gap-3">
+          <Link href="/" className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand text-primary-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus lg:hidden" aria-label="AI Job Application Assistant home"><BriefcaseBusiness size={18} aria-hidden="true" /></Link>
+          <div className="min-w-0"><p className="hidden text-xs text-text-secondary sm:block">Your workspace</p><p className="break-words text-sm font-semibold text-text-primary sm:mt-1">{dashboardPageTitle(pathname)}</p></div>
+        </div>
+        <div className="flex min-w-0 max-w-[45%] items-center gap-2.5 sm:max-w-[50%]">
+          <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-subtle text-xs font-semibold text-brand-foreground">{initials}</span>
+          <div className="min-w-0"><p title={identity} className="truncate text-xs font-medium text-text-primary sm:text-sm">{identity}</p>{name?.trim() && <p title={email} className="mt-0.5 hidden truncate text-xs text-text-secondary sm:block">{email}</p>}</div>
+        </div>
       </div>
+      <details
+        key={pathname}
+        ref={menuRef}
+        className="group border-t border-border lg:hidden"
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && menuRef.current?.open) {
+            menuRef.current.open = false;
+            menuRef.current.querySelector("summary")?.focus();
+          }
+        }}
+      >
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-4 text-sm font-medium text-text-secondary focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-focus sm:px-8 [&::-webkit-details-marker]:hidden">
+          <Menu size={17} aria-hidden="true" /> Workspace menu <ChevronDown size={16} aria-hidden="true" className="ml-auto group-open:rotate-180" />
+        </summary>
+        <div className="space-y-3 border-t border-border px-4 py-4 sm:px-8">
+          <DashboardNav label="Mobile dashboard navigation" onNavigate={() => { if (menuRef.current) menuRef.current.open = false; }} />
+          <div className="border-t border-border pt-3">{logoutControl}</div>
+        </div>
+      </details>
     </header>
   );
 }
