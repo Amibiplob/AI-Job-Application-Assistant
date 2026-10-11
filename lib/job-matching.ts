@@ -54,6 +54,71 @@ export type JobMatchResult = {
   explanation: string;
 };
 
+export const JOB_DESCRIPTION_LIMITS = {
+  title: 200,
+  company: 200,
+  description: 20_000,
+} as const;
+
+export type JobDescriptionInput = { title: string; company: string; description: string };
+export type JobDescriptionField = keyof JobDescriptionInput;
+type JobDescriptionValidation =
+  | { success: true; data: JobDescriptionInput }
+  | { success: false; errors: Partial<Record<JobDescriptionField, string>> };
+
+export type JobDescriptionAnalysis = {
+  score: number | null;
+  matchingSkills: string[];
+  skillsNotDetected: string[];
+  explanation: string;
+  nextStep: string;
+};
+
+export function validateJobDescriptionInput(input: unknown): JobDescriptionValidation {
+  const record = typeof input === "object" && input !== null
+    ? input as Record<string, unknown>
+    : {};
+  const data: JobDescriptionInput = {
+    title: typeof record.title === "string" ? record.title.trim() : "",
+    company: typeof record.company === "string" ? record.company.trim() : "",
+    description: typeof record.description === "string" ? record.description.trim() : "",
+  };
+  const errors: Partial<Record<JobDescriptionField, string>> = {};
+
+  for (const field of ["title", "company", "description"] as const) {
+    if (!data[field]) {
+      errors[field] = field === "description"
+        ? "Paste a job description."
+        : `Enter ${field === "title" ? "the job title" : "the company name"}.`;
+    } else if (data[field].length > JOB_DESCRIPTION_LIMITS[field]) {
+      errors[field] = `Keep this field under ${JOB_DESCRIPTION_LIMITS[field].toLocaleString()} characters.`;
+    }
+  }
+
+  return Object.keys(errors).length > 0 ? { success: false, errors } : { success: true, data };
+}
+
+export function analyzeJobDescriptionAgainstResume(
+  resumeContent: string,
+  description: string,
+): JobDescriptionAnalysis {
+  const match = matchResumeToJob(resumeContent, description);
+  const hasDetectedJobSkills =
+    match.matchingSkills.length > 0 || match.jobSkillsNotDetected.length > 0;
+
+  return {
+    score: hasDetectedJobSkills ? match.score : null,
+    matchingSkills: match.matchingSkills,
+    skillsNotDetected: match.jobSkillsNotDetected,
+    explanation: match.explanation,
+    nextStep: match.jobSkillsNotDetected.length > 0
+      ? "Review the skills not detected and add relevant evidence to your resume only where it accurately reflects your experience. Prepare a concrete example for each skill you choose to highlight."
+      : hasDetectedJobSkills
+        ? "Use the detected overlap to choose the most relevant experience and examples to emphasize in your application."
+        : "Compare the role requirements with your experience manually; this dictionary did not identify skills that can be scored reliably.",
+  };
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

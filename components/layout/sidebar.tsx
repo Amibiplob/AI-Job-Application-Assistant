@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LogOut,
   FileUser,
+  ClipboardCheck,
   Search,
   Settings2,
 } from "lucide-react";
@@ -16,6 +17,7 @@ const navigation = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Resume", href: "/dashboard/resume", icon: FileUser },
   { label: "Jobs", href: "/dashboard/jobs", icon: Search },
+  { label: "Analyze a job", href: "/dashboard/analyze", icon: ClipboardCheck },
   { label: "Saved jobs", href: "#saved-jobs", icon: Bookmark },
   { label: "Applications", href: "/dashboard/applications", icon: FileText },
 ];
