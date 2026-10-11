@@ -2,13 +2,13 @@ import { Badge } from "@/components/ui/badge";
 import { InlineFeedback } from "@/components/presentation/inline-feedback";
 import type { JobMatchResult } from "@/lib/job-matching";
 
-export function JobMatchSummary({ result }: { result: JobMatchResult }) {
+export function JobMatchSummary({ result }: { result: Omit<JobMatchResult, "score"> & { score: number | null } }) {
   const recognized = result.matchingSkills.length + result.jobSkillsNotDetected.length;
   return (
     <div className="mt-6 space-y-5 border-t border-border pt-6" aria-live="polite" aria-atomic="true">
       <div className="rounded-xl border border-brand/15 bg-brand-subtle p-5">
         <h3 className="text-sm font-medium text-brand-foreground">Recognized-skill text overlap</h3>
-        <p className="mt-2 text-3xl font-semibold tracking-tight text-brand">{recognized ? `${result.score}%` : "Not scored"}</p>
+        <p className="mt-2 text-3xl font-semibold tracking-tight text-brand">{recognized && result.score !== null ? `${result.score}%` : "Not scored"}</p>
         <p className="mt-2 text-sm leading-6 text-text-secondary">{recognized ? `${result.matchingSkills.length} of ${recognized} recognized job skills detected in your saved resume.` : "No dictionary skills were recognized in the job description, so there is no meaningful overlap score."}</p>
       </div>
       {recognized > 0 && <div className="grid min-w-0 gap-5 sm:grid-cols-2">

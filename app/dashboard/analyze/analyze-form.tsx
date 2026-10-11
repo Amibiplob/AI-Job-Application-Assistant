@@ -1,101 +1,75 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
-import { Badge } from "@/components/ui/badge";
+import { useActionState, useEffect, useRef, useState } from "react";
+import { ScanText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { JOB_DESCRIPTION_LIMITS } from "@/lib/job-matching";
+import { InlineFeedback } from "@/components/presentation/inline-feedback";
+import { AnalysisResults } from "@/components/jobs/analysis-results";
+import { JOB_DESCRIPTION_LIMITS, type JobDescriptionInput } from "@/lib/job-matching";
 import { analyzeJobDescription, type AnalyzeJobDescriptionState } from "./actions";
 
 const initialState: AnalyzeJobDescriptionState = { status: "idle" };
 
 export function AnalyzeForm() {
   const [state, formAction, pending] = useActionState(analyzeJobDescription, initialState);
-  const values = state.values;
-
+  const [draft, setDraft] = useState<JobDescriptionInput>({ title: "", company: "", description: "" });
+  const form = useRef<HTMLFormElement>(null);
+  const result = useRef<HTMLDivElement>(null);
+  const hasDraft = Boolean(draft.title || draft.company || draft.description);
+  useEffect(() => {
+    if (state.status === "invalid") form.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    else if (state.status !== "idle") result.current?.focus();
+  }, [state]);
+  useEffect(() => {
+    if (!hasDraft) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    const beforeNavigate = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null;
+      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+      const url = new URL(anchor.href, window.location.href);
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return;
+      if (!window.confirm("Leave this analysis? Your pasted job details are not saved.")) { event.preventDefault(); event.stopPropagation(); }
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    document.addEventListener("click", beforeNavigate, true);
+    return () => { window.removeEventListener("beforeunload", beforeUnload); document.removeEventListener("click", beforeNavigate, true); };
+  }, [hasDraft]);
+  const update = (field: keyof JobDescriptionInput, value: string) => setDraft(previous => ({ ...previous, [field]: value }));
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,0.8fr)]">
-      <Card className="gap-0 rounded-xl border-0 bg-white py-0 shadow-none ring-1 ring-[#e8ebe6]">
-        <CardContent className="p-5 sm:p-7">
-          <form action={formAction} className="space-y-5">
-            <div className="space-y-2">
-              <label htmlFor="analysis-title" className="text-sm font-medium text-[#303a33]">Job title</label>
-              <Input id="analysis-title" name="title" required maxLength={JOB_DESCRIPTION_LIMITS.title} defaultValue={values?.title} aria-invalid={Boolean(state.errors?.title)} aria-describedby={state.errors?.title ? "analysis-title-error" : undefined} className="h-11 rounded-lg border-[#dfe4dc] bg-white px-3" />
-              {state.errors?.title && <p id="analysis-title-error" className="text-sm text-red-700">{state.errors.title}</p>}
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="analysis-company" className="text-sm font-medium text-[#303a33]">Company</label>
-              <Input id="analysis-company" name="company" required maxLength={JOB_DESCRIPTION_LIMITS.company} defaultValue={values?.company} aria-invalid={Boolean(state.errors?.company)} aria-describedby={state.errors?.company ? "analysis-company-error" : undefined} className="h-11 rounded-lg border-[#dfe4dc] bg-white px-3" />
-              {state.errors?.company && <p id="analysis-company-error" className="text-sm text-red-700">{state.errors.company}</p>}
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="analysis-description" className="text-sm font-medium text-[#303a33]">Job description</label>
-              <Textarea id="analysis-description" name="description" required maxLength={JOB_DESCRIPTION_LIMITS.description} rows={14} defaultValue={values?.description} placeholder="Paste the role description and requirements here." aria-invalid={Boolean(state.errors?.description)} aria-describedby={state.errors?.description ? "analysis-description-error" : "analysis-description-help"} className="min-h-[280px] resize-y rounded-lg border-[#dfe4dc] bg-white px-3 py-3 leading-6" />
-              <p id="analysis-description-help" className="text-xs text-[#7b837a]">Up to {JOB_DESCRIPTION_LIMITS.description.toLocaleString()} characters. This text is analyzed for this request and is not saved.</p>
-              {state.errors?.description && <p id="analysis-description-error" className="text-sm text-red-700">{state.errors.description}</p>}
-            </div>
-
-            {state.status === "error" && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{state.message}</p>}
-            <Button type="submit" disabled={pending} className="h-10 rounded-lg bg-[#203c32] px-4 text-sm text-white hover:bg-[#2d5143]">
-              {pending ? "Analyzing…" : "Analyze against my resume"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <div className="space-y-5">
-        {(state.status === "no-resume" || state.status === "empty-resume") && (
-          <Card className="rounded-xl border-0 bg-white py-0 shadow-none ring-1 ring-[#e8ebe6]">
-            <CardContent className="p-5 sm:p-7" role="status">
-              <h2 className="font-semibold">Add your resume first</h2>
-              <p className="mt-2 text-sm leading-6 text-[#747c73]">{state.message ?? "Save resume content to compare this role with your experience."}</p>
-              <Button render={<Link href="/dashboard/resume" />} className="mt-4 h-10 rounded-lg bg-[#203c32] px-4 text-sm text-white hover:bg-[#2d5143]">Go to my resume</Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {state.status === "success" && state.analysis && (
-          <Card className="rounded-xl border-0 bg-white py-0 shadow-none ring-1 ring-[#e8ebe6]">
-            <CardContent className="p-5 sm:p-7" aria-live="polite">
-              <p className="text-xs font-medium text-[#818980]">ANALYSIS</p>
-              <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em]">{values?.title} at {values?.company}</h2>
-              {state.analysis.score === null ? (
-                <p className="mt-4 rounded-lg bg-[#f6f8f5] p-4 text-sm leading-6 text-[#59645a]">No score is shown because the description did not contain skills from the current matching dictionary.</p>
-              ) : (
-                <div className="mt-5 flex items-baseline gap-2">
-                  <span className="text-4xl font-semibold tracking-[-0.06em] text-[#365440]">{state.analysis.score}%</span>
-                  <span className="text-sm text-[#566057]">detected skill overlap</span>
-                </div>
-              )}
-
-              <section className="mt-6">
-                <h3 className="text-sm font-semibold">Skills detected in both</h3>
-                {state.analysis.matchingSkills.length ? (
-                  <ul className="mt-2 flex flex-wrap gap-2">{state.analysis.matchingSkills.map((skill) => <li key={skill}><Badge variant="secondary" className="border-0 bg-[#edf2ec] text-[#47604b]">{skill}</Badge></li>)}</ul>
-                ) : <p className="mt-2 text-sm text-[#747c73]">No shared dictionary skills were detected.</p>}
-              </section>
-
-              <section className="mt-5">
-                <h3 className="text-sm font-semibold">Job-description skills not detected in your resume</h3>
-                {state.analysis.skillsNotDetected.length ? (
-                  <ul className="mt-2 flex flex-wrap gap-2">{state.analysis.skillsNotDetected.map((skill) => <li key={skill}><Badge variant="outline" className="border-[#e3e8e1] text-[#647064]">{skill}</Badge></li>)}</ul>
-                ) : <p className="mt-2 text-sm text-[#747c73]">No additional dictionary skills were detected.</p>}
-              </section>
-
-              <div className="mt-5 rounded-lg bg-[#f6f8f5] p-4">
-                <h3 className="text-sm font-semibold">Suggested next step</h3>
-                <p className="mt-2 text-sm leading-6 text-[#59645a]">{state.analysis.explanation}</p>
-                <p className="mt-2 text-sm leading-6 text-[#59645a]">{state.analysis.nextStep}</p>
-                <p className="mt-2 text-xs leading-5 text-[#7b837a]">This score is a text-overlap heuristic, not a hiring probability or a complete assessment. The dictionary may miss skills and wording; undetected skills may still be part of your experience.</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+    <div className="grid min-w-0 items-start gap-6 xl:grid-cols-2">
+      <Card className="gap-0 py-0 shadow-subtle"><CardContent className="min-w-0 p-5 sm:p-8">
+        <h2 className="text-xl font-semibold tracking-tight">Opportunity details</h2>
+        <p className="mt-3 text-sm leading-6 text-text-secondary">Copy the actual role requirements for the most useful comparison. Example only: “React and TypeScript experience; SQL is useful.” This sample is not a real job listing.</p>
+        <form ref={form} action={formAction} aria-label="Analyze a job description" aria-busy={pending} className="mt-6">
+          <fieldset disabled={pending} className="min-w-0 space-y-5"><legend className="sr-only">Job description details</legend>
+            {(["title", "company", "description"] as const).map(field => {
+              const id = `analysis-${field}`;
+              const error = state.errors?.[field];
+              const common = { id, name: field, required: true, maxLength: JOB_DESCRIPTION_LIMITS[field], value: draft[field], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => update(field, event.target.value), "aria-invalid": Boolean(error), "aria-describedby": `${id}-help${error ? ` ${id}-error` : ""}` };
+              return <div key={field} className="min-w-0 space-y-2"><label htmlFor={id} className="text-sm font-medium">{field === "title" ? "Job title" : field === "company" ? "Company" : "Job description"}</label>{field === "description" ? <Textarea {...common} rows={12} placeholder="Paste the role description and requirements here." className="min-h-72 resize-y leading-6" /> : <Input {...common} className="h-11" />}<p id={`${id}-help`} className="text-xs text-text-secondary">{draft[field].length} / {JOB_DESCRIPTION_LIMITS[field]} characters{field === "description" ? ". Processed for this request only; not saved or sent to an external service." : "."}</p>{error && <p id={`${id}-error`} className="text-sm text-error">{error}</p>}</div>;
+            })}
+            <Button type="submit" disabled={pending} className="h-auto min-h-11 max-w-full whitespace-normal">{pending ? "Analyzing…" : "Analyze against my resume"}</Button>
+          </fieldset>
+          {pending && <p role="status" className="mt-4 text-sm text-text-secondary">Comparing recognized skills with your saved resume…</p>}
+          <p className="mt-4 text-xs leading-5 text-text-secondary">Pasted details remain in this form after analysis. Leaving or refreshing this page discards them.</p>
+        </form>
+      </CardContent></Card>
+      <div className="min-w-0 space-y-6">
+        <Card className="gap-0 py-0 shadow-subtle"><CardContent ref={result} tabIndex={-1} className="min-w-0 rounded-xl p-5 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus sm:p-8">
+          {state.status === "success" && state.analysis && state.values ? <AnalysisResults analysis={state.analysis} values={state.values} /> : <>
+            <ScanText aria-hidden="true" className="size-6 text-brand" /><h2 className="mt-4 text-xl font-semibold tracking-tight">{pending ? "Analysis in progress" : "Your comparison appears here"}</h2>
+            <p className="mt-3 text-sm leading-6 text-text-secondary">Submit the job details to compare recognized skills. Results describe text overlap with your saved resume, not your overall suitability for the role.</p>
+          </>}
+          {state.status === "invalid" && <InlineFeedback tone="error" title="Check the job details" className="mt-5">Review the highlighted fields. Your input has been kept.</InlineFeedback>}
+          {state.status === "error" && <InlineFeedback tone="error" title="Analysis unavailable" className="mt-5">{state.message} Your input has been kept; try again.</InlineFeedback>}
+          {(state.status === "no-resume" || state.status === "empty-resume") && <InlineFeedback title="Add resume content first" className="mt-5">{state.message ?? "Save a resume before comparing this role."} <Link href="/dashboard/resume" className="rounded-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-focus">Open your resume workspace</Link>.</InlineFeedback>}
+        </CardContent></Card>
+        <InlineFeedback announcement="off" title="How to read the results">The denominator contains only job-description skills recognized by the dictionary. Accessibility and responsive-design requirements may not be recognized unless included in that dictionary. Review the full role requirements yourself.</InlineFeedback>
       </div>
     </div>
   );
