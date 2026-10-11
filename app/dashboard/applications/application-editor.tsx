@@ -1,51 +1,40 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { InlineFeedback } from "@/components/presentation/inline-feedback";
+import { applicationDate, statusLabel } from "@/components/jobs/application-presentation";
 import type { Application } from "@/lib/applications";
 import { APPLICATION_STATUSES } from "@/lib/application-validation";
 import { saveApplication, type UpdateApplicationState } from "./actions";
 
 const initialState: UpdateApplicationState = { status: "idle" };
 
-function formatStatus(status: string): string {
-  return status.charAt(0) + status.slice(1).toLowerCase();
-}
-
-function dateValue(date: Date | null): string {
-  return date ? date.toISOString().slice(0, 10) : "";
-}
-
 export function ApplicationEditor({ application }: { application: Application }) {
   const [state, formAction, pending] = useActionState(saveApplication, initialState);
-
+  // Controlled drafts survive React's action form reset, including failed saves.
+  const [status, setStatus] = useState<string>(application.status);
+  const [appliedAt, setAppliedAt] = useState(applicationDate(application.appliedAt));
+  const [notes, setNotes] = useState(application.notes ?? "");
+  const prefix = `application-${application.id}`;
   return (
-    <form action={formAction} className="mt-5 border-t border-[#edf0eb] pt-4">
+    <form action={formAction} aria-label={`Update ${application.job.title || "application"}`} aria-busy={pending} aria-describedby={`${prefix}-help`} className="mt-6 border-t border-border pt-6">
+      <h3 className="text-sm font-semibold">Update tracking</h3>
+      <p id={`${prefix}-help`} className="mt-2 text-xs leading-5 text-text-secondary">Choose your current status. The optional applied date records when you applied; it is never filled automatically. Save before changing filters or leaving this page.</p>
       <input type="hidden" name="applicationId" value={application.id} />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <label htmlFor={`status-${application.id}`} className="text-xs font-medium text-[#566057]">Status</label>
-          <select id={`status-${application.id}`} name="status" defaultValue={application.status} className="h-10 w-full rounded-lg border border-[#dfe4dc] bg-white px-3 text-sm text-[#344039] outline-none focus-visible:ring-3 focus-visible:ring-[#91a894]/40">
-            {APPLICATION_STATUSES.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
-          </select>
+      <fieldset disabled={pending} className="mt-5 min-w-0 space-y-5">
+        <legend className="sr-only">Application details</legend>
+        <div className="grid min-w-0 gap-5 sm:grid-cols-2">
+          <div className="min-w-0 space-y-2"><label htmlFor={`${prefix}-status`} className="text-sm font-medium">Status</label><select id={`${prefix}-status`} name="status" value={status} onChange={event => setStatus(event.target.value)} className="h-11 w-full min-w-0 rounded-lg border border-input bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">{APPLICATION_STATUSES.map(value => <option key={value} value={value}>{statusLabel(value)}</option>)}</select></div>
+          <div className="min-w-0 space-y-2"><label htmlFor={`${prefix}-date`} className="text-sm font-medium">Applied date <span className="font-normal text-text-secondary">(optional)</span></label><Input id={`${prefix}-date`} name="appliedAt" type="date" value={appliedAt} onChange={event => setAppliedAt(event.target.value)} className="h-11 min-w-0 max-w-full" /></div>
         </div>
-        <div className="space-y-2">
-          <label htmlFor={`applied-at-${application.id}`} className="text-xs font-medium text-[#566057]">Applied date <span className="font-normal text-[#8b9289]">(optional)</span></label>
-          <Input id={`applied-at-${application.id}`} name="appliedAt" type="date" defaultValue={dateValue(application.appliedAt)} className="h-10 rounded-lg border-[#dfe4dc] text-sm" />
-        </div>
-      </div>
-
-      <div className="mt-4 space-y-2">
-        <label htmlFor={`notes-${application.id}`} className="text-xs font-medium text-[#566057]">Notes <span className="font-normal text-[#8b9289]">(optional)</span></label>
-        <Textarea id={`notes-${application.id}`} name="notes" defaultValue={application.notes ?? ""} maxLength={5000} rows={3} placeholder="Add a note about this application" className="min-h-20 resize-y rounded-lg border-[#dfe4dc] px-3 py-2 text-sm leading-5" />
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={pending} variant="outline" className="h-9 rounded-lg border-[#dfe4dc] px-3 text-xs">{pending ? "Saving…" : "Save updates"}</Button>
-        {state.message && <p role={state.status === "error" ? "alert" : "status"} className={`text-xs ${state.status === "error" ? "text-red-700" : "text-[#55705a]"}`}>{state.message}</p>}
-      </div>
+        <div className="space-y-2"><label htmlFor={`${prefix}-notes`} className="text-sm font-medium">Notes <span className="font-normal text-text-secondary">(optional)</span></label><Textarea id={`${prefix}-notes`} name="notes" value={notes} onChange={event => setNotes(event.target.value)} maxLength={5000} rows={4} aria-describedby={`${prefix}-notes-help`} placeholder="Keep useful details about your application here" className="min-h-28 resize-y" /><p id={`${prefix}-notes-help`} className="text-xs text-text-secondary">Up to 5,000 characters.</p></div>
+        <Button type="submit" className="min-h-11">{pending ? "Saving…" : "Save updates"}</Button>
+      </fieldset>
+      {pending && <p role="status" className="mt-4 text-sm text-text-secondary">Saving your tracking update…</p>}
+      {!pending && state.message && <InlineFeedback className="mt-4" tone={state.status === "error" ? "error" : "success"} title={state.status === "error" ? "Update not saved" : "Changes saved"}>{state.message}{state.status === "error" && " Your edits are still in the form."}</InlineFeedback>}
     </form>
   );
 }
