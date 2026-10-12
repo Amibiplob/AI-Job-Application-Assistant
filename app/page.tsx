@@ -51,6 +51,7 @@ export default async function Home() {
           </Link>
           <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:gap-6">
             <a href="#features" className={`inline-flex min-h-11 items-center rounded-md text-sm font-medium text-slate-600 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>Features</a>
+            <Link href="/connect" className={`inline-flex min-h-11 items-center rounded-md text-sm font-medium text-slate-600 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>Connect to ChatGPT</Link>
             <Link href={workspaceHref} className={cn(buttonVariants(), primaryButton, "h-11 px-4")}>{startLabel} <ArrowRight aria-hidden="true" /></Link>
           </div>
         </nav>
