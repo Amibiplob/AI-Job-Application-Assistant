@@ -5,6 +5,7 @@
  * covers every relevant skill or wording used in resumes and job descriptions.
  */
 export const SKILL_DICTIONARY = [
+  { skill: "Accessibility", aliases: ["Accessibility"] },
   { skill: "Angular", aliases: ["Angular", "Angular.io"] },
   { skill: "ARIA", aliases: ["WAI-ARIA", "Accessible Rich Internet Applications"] },
   { skill: "ARIA", aliases: ["ARIA"], caseSensitive: true },
@@ -41,7 +42,7 @@ export const SKILL_DICTIONARY = [
   { skill: "React", aliases: ["React", "React.js", "React JS", "ReactJS"] },
   { skill: "Redis", aliases: ["Redis"] },
   { skill: "REST APIs", aliases: ["REST API", "REST APIs", "RESTful API", "RESTful APIs"] },
-  { skill: "Responsive design", aliases: ["Responsive design", "Responsive web design", "Responsive layouts", "Responsive layout"] },
+  { skill: "Responsive design", aliases: ["Responsive design", "Responsive web design", "Responsive layouts", "Responsive layout", "Responsive web applications", "Responsive web application"] },
   { skill: "Ruby", aliases: ["Ruby"] },
   { skill: "Ruby on Rails", aliases: ["Ruby on Rails", "Rails"] },
   { skill: "Rust", aliases: ["Rust"] },

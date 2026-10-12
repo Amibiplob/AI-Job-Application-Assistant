@@ -55,3 +55,23 @@ test("remote analysis preserves structured/text contracts for expanded skills an
   assert.deepEqual(result.content, [{ type: "text", text: JSON.stringify(result.structuredContent) }]);
   assert.doesNotMatch(JSON.stringify(result), /Private resume|Private posting/);
 });
+
+test("remote analysis scores the exact frontend example using five explicit requirements", async () => {
+  let analyze;
+  registerJobAnalysisTool({ registerTool(_name, _config, callback) { analyze = callback; } });
+  const input = {
+    resumeText: "I have experience with React, Next.js, TypeScript, JavaScript, PostgreSQL, and Tailwind CSS.",
+    jobDescription: "We are hiring a frontend developer experienced with React, TypeScript, Next.js, accessibility, and responsive web applications.",
+  };
+  const result = await analyze(input);
+  assert.equal(result.structuredContent.score, 60);
+  assert.deepEqual(result.structuredContent.matchingSkills, ["Next.js", "React", "TypeScript"]);
+  assert.deepEqual(result.structuredContent.skillsNotDetected, ["Accessibility", "Responsive design"]);
+  assert.match(result.structuredContent.explanation, /Detected 3 of 5/);
+  assert.match(result.structuredContent.nextStep, /only where it accurately reflects your experience/);
+  assert.deepEqual(Object.keys(result.structuredContent).sort(),
+    ["score", "matchingSkills", "skillsNotDetected", "explanation", "nextStep", "scoreDescription"].sort());
+  assert.deepEqual(result.content, [{ type: "text", text: JSON.stringify(result.structuredContent) }]);
+  assert.match(result.structuredContent.scoreDescription, /not a hiring probability/);
+  assert.equal((await analyze({ ...input, jobDescription: "Seeking a thoughtful teammate." })).structuredContent.score, null);
+});

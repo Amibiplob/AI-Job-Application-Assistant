@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detectSkills, matchResumeToJob, SKILL_DICTIONARY } from "../lib/job-matching.ts";
+import { analyzeJobDescriptionAgainstResume, detectSkills, matchResumeToJob, SKILL_DICTIONARY } from "../lib/job-matching.ts";
 
 test("detects canonical skills case-insensitively and recognizes listed aliases", () => {
   assert.deepEqual(
@@ -78,7 +78,7 @@ test("every listed alias resolves to its canonical skill without duplicate outpu
 
 test("handles wrapped phrases and nonbreaking whitespace without loosening punctuation", () => {
   assert.deepEqual(detectSkills("Web Content\nAccessibility Guidelines, Accessible Rich\tInternet Applications, responsive\u00a0web design, RESTful\nAPIs"),
-    ["ARIA", "REST APIs", "Responsive design", "WCAG"]);
+    ["Accessibility", "ARIA", "REST APIs", "Responsive design", "WCAG"]);
   assert.deepEqual(detectSkills("NextXjs NodeXjs Cx .NETwork"), []);
   assert.deepEqual(detectSkills("(C#), C++, .NET; React/TypeScript"), ["C#", "C++", ".NET", "React", "TypeScript"]);
 });
@@ -106,4 +106,32 @@ test("new aliases count unique job skills once and preserve the rounded denomina
     score: 0, matchingSkills: [], jobSkillsNotDetected: ["Vitest", "WCAG"],
     explanation: "Detected 0 of 2 job-description skills in the resume (0% overlap). Skills not detected may still be part of the candidate’s experience; this text-based baseline only compares terms in the supplied text.",
   });
+});
+
+test("recognizes all five requirements in the supplied frontend job without inferring resume skills", () => {
+  const resume = "I have experience with React, Next.js, TypeScript, JavaScript, PostgreSQL, and Tailwind CSS.";
+  const job = "We are hiring a frontend developer experienced with React, TypeScript, Next.js, accessibility, and responsive web applications.";
+  assert.deepEqual(detectSkills(job), ["Accessibility", "Next.js", "React", "Responsive design", "TypeScript"]);
+  assert.equal(detectSkills(resume).includes("Accessibility"), false);
+  assert.equal(detectSkills(resume).includes("Responsive design"), false);
+  const match = matchResumeToJob(resume, job);
+  assert.deepEqual(match, {
+    score: 60,
+    matchingSkills: ["Next.js", "React", "TypeScript"],
+    jobSkillsNotDetected: ["Accessibility", "Responsive design"],
+    explanation: "Detected 3 of 5 job-description skills in the resume (60% overlap). Skills not detected may still be part of the candidate’s experience; this text-based baseline only compares terms in the supplied text.",
+  });
+  assert.deepEqual(matchResumeToJob(resume, `${job} Accessibility, responsive web application, responsive design, React.js, NextJS.`), match);
+  assert.equal(matchResumeToJob(`${resume} Accessibility and responsive design.`, job).score, 100);
+  const analysis = analyzeJobDescriptionAgainstResume(resume, job);
+  assert.equal(analysis.score, match.score);
+  assert.deepEqual(analysis.skillsNotDetected, match.jobSkillsNotDetected);
+  assert.match(analysis.nextStep, /only where it accurately reflects your experience/);
+  assert.equal(analyzeJobDescriptionAgainstResume(resume, "Seeking a thoughtful teammate.").score, null);
+});
+
+test("new requirement phrases retain whole-term boundaries and accept extracted whitespace", () => {
+  assert.deepEqual(detectSkills("ACCESSIBILITY; responsive\nweb\u00a0applications"), ["Accessibility", "Responsive design"]);
+  assert.deepEqual(detectSkills("inaccessibility accessibilityish préaccessibility accessibilityé unresponsive web applications responsive web applicationsish"), []);
+  assert.deepEqual(detectSkills("React and Tailwind CSS"), ["CSS", "React", "Tailwind CSS"]);
 });
