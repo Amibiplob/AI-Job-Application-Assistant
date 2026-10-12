@@ -3,6 +3,8 @@ import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { getJobById, listJobs } from "@/lib/jobs";
 import { registerJobTools } from "@/lib/mcp/register-job-tools";
 import { registerJobAnalysisTool } from "@/lib/mcp/register-job-analysis-tool";
+import { limiter } from "@/lib/abuse-protection";
+import { createToolAdmission, protectMcpRequest } from "@/lib/mcp/abuse-protection";
 import {
   getRemoteMcpAuthConfig,
   getRemoteMcpBearerGate,
@@ -16,8 +18,9 @@ const mcpHandler = createMcpHandler(() => {
     version: "0.1.0",
   });
 
-  registerJobTools(server, { getJobById, listJobs });
-  registerJobAnalysisTool(server);
+  const admission = createToolAdmission(limiter);
+  registerJobTools(server, { getJobById, listJobs }, admission);
+  registerJobAnalysisTool(server, admission);
   return server;
 }, { maxRequestBodySize: 256 * 1024 });
 
@@ -30,10 +33,8 @@ async function handleRequest(request: Request): Promise<Response> {
     );
   }
 
-  const auth = await getRemoteMcpBearerGate(config)(request);
-  if (auth instanceof Response) return auth;
-
-  return mcpHandler.fetch(request, { authInfo: auth });
+  return protectMcpRequest(request, limiter, getRemoteMcpBearerGate(config),
+    (incoming, auth) => mcpHandler.fetch(incoming, { authInfo: auth }));
 }
 
 export const POST = handleRequest;

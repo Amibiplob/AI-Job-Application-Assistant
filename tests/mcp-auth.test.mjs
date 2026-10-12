@@ -84,6 +84,13 @@ test("rejects an invalid signature", async () => {
   );
 });
 
+test("only signed Auth0 subject claims supply the limiter identity", async () => {
+  const verified = await verifier().verifyAccessToken(await token({ sub: "synthetic-subject" }));
+  assert.deepEqual(verified.extra, { rateLimitSubject: "synthetic-subject" });
+  assert.equal((await verifier().verifyAccessToken(await token())).extra, undefined);
+  await assert.rejects(verifier().verifyAccessToken(await token({ sub: "forged-subject" }, otherPrivateKey)), { code: "invalid_token" });
+});
+
 test("rejects issuer and audience mismatches", async () => {
   await assert.rejects(
     verifier().verifyAccessToken(

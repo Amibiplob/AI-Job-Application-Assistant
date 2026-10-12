@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { createSession, verifyPassword } from "@/lib/auth";
 import { pool } from "@/lib/db/pool";
+import { protectAuth } from "@/lib/abuse-protection";
+import { retryMessage } from "@/lib/rate-limit";
 
 type LoginField = "email" | "password";
 
@@ -29,6 +31,9 @@ export async function login(
   const email = readText(formData, "email").trim().toLowerCase();
   const password = readText(formData, "password");
   const errors: Partial<Record<LoginField, string>> = {};
+
+  const admission = await protectAuth("login", email.slice(0, 254));
+  if (!admission.allowed) return { message: retryMessage(admission), email };
 
   if (!email) {
     errors.email = "Enter your email address.";

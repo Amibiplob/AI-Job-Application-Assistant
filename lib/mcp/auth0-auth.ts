@@ -104,6 +104,8 @@ export function createAuth0TokenVerifier(
           scopes,
           expiresAt: payload.exp,
           resource: config.resource,
+          extra: typeof payload.sub === "string" && payload.sub
+            ? { rateLimitSubject: payload.sub } : undefined,
         };
       } catch {
         throw invalidToken();

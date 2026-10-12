@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { createSession, hashPassword } from "@/lib/auth";
 import { pool } from "@/lib/db/pool";
+import { protectAuth } from "@/lib/abuse-protection";
+import { retryMessage } from "@/lib/rate-limit";
 
 type SignupField = "name" | "email" | "password" | "confirmPassword";
 
@@ -40,6 +42,9 @@ export async function signup(
   const confirmPassword = readText(formData, "confirmPassword");
   const errors: Partial<Record<SignupField, string>> = {};
 
+  const admission = await protectAuth("signup", email.slice(0, 254));
+  if (!admission.allowed) return { message: retryMessage(admission), values: { name, email } };
+
   if (!name) {
     errors.name = "Enter your name.";
   } else if (name.length > 100) {
@@ -73,17 +78,16 @@ export async function signup(
     return { errors, values: { name, email } };
   }
 
-  const existingUser = await pool.query("SELECT 1 FROM users WHERE email = $1 LIMIT 1", [email]);
-  if (existingUser.rowCount) {
-    return {
-      errors: { email: "An account with this email already exists." },
-      values: { name, email },
-    };
-  }
-
   let createdUserId: string | undefined;
 
   try {
+    const existingUser = await pool.query("SELECT 1 FROM users WHERE email = $1 LIMIT 1", [email]);
+    if (existingUser.rowCount) {
+      return {
+        errors: { email: "An account with this email already exists." },
+        values: { name, email },
+      };
+    }
     const passwordHash = await hashPassword(password);
     const result = await pool.query<{ id: string }>(
       `INSERT INTO users (name, email, password_hash)

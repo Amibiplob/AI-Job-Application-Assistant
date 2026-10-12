@@ -32,10 +32,11 @@ test("remote handler registers existing and analysis tools only behind bearer au
   const route = await readFile(new URL("../app/api/mcp/route.ts", import.meta.url), "utf8");
   const stdio = await readFile(new URL("../scripts/mcp-server.ts", import.meta.url), "utf8");
 
-  assert.match(route, /registerJobTools\(server, \{ getJobById, listJobs \}\)/);
-  assert.match(route, /registerJobAnalysisTool\(server\)/);
+  assert.match(route, /registerJobTools\(server, \{ getJobById, listJobs \}, admission\)/);
+  assert.match(route, /registerJobAnalysisTool\(server, admission\)/);
   assert.match(route, /maxRequestBodySize:\s*256\s*\*\s*1024/);
-  assert.ok(route.indexOf("getRemoteMcpBearerGate(config)") < route.indexOf("mcpHandler.fetch(request"));
+  assert.match(route, /protectMcpRequest\(request, limiter, getRemoteMcpBearerGate\(config\)/);
+  assert.match(route, /mcpHandler.fetch\(incoming, \{ authInfo: auth \}\)/);
   assert.match(stdio, /registerJobTools\(server, \{ getJobById, listJobs \}\)/);
   assert.doesNotMatch(stdio, /registerJobAnalysisTool|analyze_job_match/);
 });
