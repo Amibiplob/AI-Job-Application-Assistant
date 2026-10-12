@@ -1,50 +1,59 @@
 /**
  * Explicit vocabulary for this rule-based baseline. Aliases are matched as
  * whole terms so, for example, "Go" does not match the end of another word.
- * This is intentionally a small and editable dictionary, not a claim that it
+ * This is intentionally an explicit and editable dictionary, not a claim that it
  * covers every relevant skill or wording used in resumes and job descriptions.
  */
 export const SKILL_DICTIONARY = [
+  { skill: "Angular", aliases: ["Angular", "Angular.io"] },
+  { skill: "ARIA", aliases: ["WAI-ARIA", "Accessible Rich Internet Applications"] },
+  { skill: "ARIA", aliases: ["ARIA"], caseSensitive: true },
   { skill: "AWS", aliases: ["AWS", "Amazon Web Services"] },
   { skill: "Azure", aliases: ["Azure", "Microsoft Azure"] },
-  { skill: "C#", aliases: ["C#", "C Sharp"] },
+  { skill: "C#", aliases: ["C#", "C Sharp", "CSharp"] },
   { skill: "C++", aliases: ["C++", "CPP"] },
-  { skill: "CSS", aliases: ["CSS", "Cascading Style Sheets"] },
+  { skill: "CSS", aliases: ["CSS", "CSS3", "Cascading Style Sheets"] },
   { skill: "Cypress", aliases: ["Cypress"] },
   { skill: "Django", aliases: ["Django"] },
   { skill: "Docker", aliases: ["Docker"] },
   { skill: ".NET", aliases: [".NET", "Dot Net"] },
-  { skill: "Express", aliases: ["Express", "Express.js", "Express JS"] },
+  { skill: "Express", aliases: ["Express", "Express.js", "Express JS", "ExpressJS"] },
   { skill: "FastAPI", aliases: ["FastAPI", "Fast API"] },
   { skill: "GCP", aliases: ["GCP", "Google Cloud Platform"] },
   { skill: "Git", aliases: ["Git"] },
   { skill: "Go", aliases: ["Golang"] },
   { skill: "Go", aliases: ["Go"], caseSensitive: true },
   { skill: "GraphQL", aliases: ["GraphQL"] },
-  { skill: "HTML", aliases: ["HTML", "HyperText Markup Language"] },
+  { skill: "HTML", aliases: ["HTML", "HTML5", "HyperText Markup Language"] },
   { skill: "Java", aliases: ["Java"] },
-  { skill: "JavaScript", aliases: ["JavaScript"] },
+  { skill: "JavaScript", aliases: ["JavaScript", "ECMAScript"] },
   { skill: "Jest", aliases: ["Jest"] },
+  { skill: "Keyboard accessibility", aliases: ["Keyboard accessibility", "Keyboard accessible", "Keyboard navigation", "Keyboard support"] },
   { skill: "Kubernetes", aliases: ["Kubernetes", "K8s"] },
   { skill: "MongoDB", aliases: ["MongoDB", "Mongo DB"] },
   { skill: "MySQL", aliases: ["MySQL"] },
-  { skill: "Next.js", aliases: ["Next.js", "Next JS"] },
-  { skill: "Node.js", aliases: ["Node.js", "Node JS"] },
+  { skill: "NestJS", aliases: ["NestJS", "Nest.js", "Nest JS"] },
+  { skill: "Next.js", aliases: ["Next.js", "Next JS", "NextJS"] },
+  { skill: "Node.js", aliases: ["Node.js", "Node JS", "NodeJS"] },
   { skill: "Playwright", aliases: ["Playwright"] },
   { skill: "PostgreSQL", aliases: ["PostgreSQL", "Postgres"] },
   { skill: "Python", aliases: ["Python"] },
-  { skill: "React", aliases: ["React", "React.js", "React JS"] },
+  { skill: "React", aliases: ["React", "React.js", "React JS", "ReactJS"] },
   { skill: "Redis", aliases: ["Redis"] },
   { skill: "REST APIs", aliases: ["REST API", "REST APIs", "RESTful API", "RESTful APIs"] },
+  { skill: "Responsive design", aliases: ["Responsive design", "Responsive web design", "Responsive layouts", "Responsive layout"] },
   { skill: "Ruby", aliases: ["Ruby"] },
   { skill: "Ruby on Rails", aliases: ["Ruby on Rails", "Rails"] },
   { skill: "Rust", aliases: ["Rust"] },
+  { skill: "Semantic HTML", aliases: ["Semantic HTML", "Semantic HTML5", "Semantic markup"] },
   { skill: "Spring", aliases: ["Spring", "Spring Boot"] },
   { skill: "SQL", aliases: ["SQL"] },
-  { skill: "Tailwind CSS", aliases: ["Tailwind CSS", "Tailwind"] },
+  { skill: "Tailwind CSS", aliases: ["Tailwind CSS", "Tailwind", "TailwindCSS"] },
   { skill: "Terraform", aliases: ["Terraform"] },
   { skill: "TypeScript", aliases: ["TypeScript"] },
-  { skill: "Vue", aliases: ["Vue", "Vue.js", "Vue JS"] },
+  { skill: "Vitest", aliases: ["Vitest"] },
+  { skill: "Vue", aliases: ["Vue", "Vue.js", "Vue JS", "VueJS"] },
+  { skill: "WCAG", aliases: ["WCAG", "Web Content Accessibility Guidelines"] },
 ] as const;
 
 export type JobMatchResult = {
@@ -125,7 +134,10 @@ function escapeRegExp(value: string): string {
 
 function containsTerm(text: string, term: string, caseSensitive: boolean): boolean {
   const flags = caseSensitive ? "u" : "iu";
-  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(term)}(?=$|[^\\p{L}\\p{N}])`, flags);
+  // Resume extraction and pasted descriptions often wrap multiword skills or
+  // use nonbreaking spaces. Keep punctuation literal while accepting whitespace.
+  const phrase = term.split(/\s+/u).map(escapeRegExp).join("\\s+");
+  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${phrase}(?=$|[^\\p{L}\\p{N}])`, flags);
   return pattern.test(text);
 }
 

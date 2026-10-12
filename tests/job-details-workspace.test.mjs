@@ -66,3 +66,14 @@ test('real tracking reads/writes remain scoped to the active session user',async
  reset();await getApplicationForJob(baseline.id);assert.match(sqlCalls[0].sql,/WHERE user_id = \$1 AND job_id = \$2/);assert.deepEqual(sqlCalls[0].values,['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',baseline.id]);
  await addApplication(baseline.id);const write=sqlCalls.find(call=>call.sql.includes('INSERT INTO applications'));assert.ok(write);assert.deepEqual(write.values,['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',baseline.id]);assert.match(write.sql,/ON CONFLICT \(user_id, job_id\) DO NOTHING/);
 });
+test('job details action and summary share expanded alias recognition and scoring',async()=>{
+ reset();resume={content:'NextJS NodeJS WAI-ARIA Vitest'};
+ job.description='Next.js Node JS ARIA Vitest Angular WCAG 2.2';
+ const state=await matchJobWithResume({status:'idle'},data());
+ assert.equal(state.status,'success');assert.equal(state.result.score,67);
+ assert.deepEqual(state.result.matchingSkills,['ARIA','Next.js','Node.js','Vitest']);
+ assert.deepEqual(state.result.jobSkillsNotDetected,['Angular','WCAG']);
+ const html=render(Summary,{result:state.result});
+ assert.match(html,/67%/);assert.match(html,/4 of 6 recognized job skills/);
+ assert.match(html,/not a hiring probability/);
+});

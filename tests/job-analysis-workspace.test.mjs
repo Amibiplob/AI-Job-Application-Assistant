@@ -23,6 +23,18 @@ const React=require('react');const {renderToStaticMarkup}=require('react-dom/ser
 const render=(component,props)=>renderToStaticMarkup(React.createElement(component,props));
 const values={title:'Synthetic developer',company:'Example employer',description:'React TypeScript SQL'};
 const data=()=>{const form=new FormData();for(const [key,value] of Object.entries(values))form.set(key,value);return form;};
+test('analysis action and summary use expanded aliases with the recognized job-skill denominator',async()=>{
+ authenticated=true;failed=false;resume={content:'NextJS NodeJS WAI-ARIA Vitest'};
+ const form=data();form.set('description','Next.js Node JS ARIA Vitest Angular WCAG 2.2');
+ const result=await analyzeJobDescription({status:'idle'},form);
+ assert.equal(result.status,'success');assert.equal(result.analysis.score,67);
+ assert.deepEqual(result.analysis.matchingSkills,['ARIA','Next.js','Node.js','Vitest']);
+ assert.deepEqual(result.analysis.skillsNotDetected,['Angular','WCAG']);
+ const html=render(Results,{analysis:result.analysis,values:result.values});
+ assert.match(html,/67%/);assert.match(html,/4 of 6 recognized job skills/);
+ assert.match(html,/Angular/);assert.match(html,/WCAG/);assert.match(html,/not a hiring probability/);
+ resume=null;
+});
 test('readiness handles missing, empty, ready and failed resume reads',async()=>{
  resume=null;assert.match(renderToStaticMarkup(await Page()),/Save your resume first/);resume={content:'  '};assert.match(renderToStaticMarkup(await Page()),/Your saved resume is empty/);resume={content:'React'};assert.match(renderToStaticMarkup(await Page()),/Saved resume ready/);failed=true;assert.match(renderToStaticMarkup(await Page()),/Resume status unavailable/);failed=false;
 });

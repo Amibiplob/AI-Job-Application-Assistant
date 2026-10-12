@@ -39,3 +39,19 @@ test("remote handler registers existing and analysis tools only behind bearer au
   assert.match(stdio, /registerJobTools\(server, \{ getJobById, listJobs \}\)/);
   assert.doesNotMatch(stdio, /registerJobAnalysisTool|analyze_job_match/);
 });
+
+test("remote analysis preserves structured/text contracts for expanded skills and aliases", async () => {
+  let analyze;
+  registerJobAnalysisTool({ registerTool(_name, _config, callback) { analyze = callback; } });
+  const result = await analyze({
+    resumeText: "Private resume: NextJS, NodeJS, WAI-ARIA, Vitest.",
+    jobDescription: "Private posting: Next.js, Node JS, ARIA, Vitest, Angular, WCAG 2.2.",
+  });
+  assert.deepEqual(Object.keys(result.structuredContent).sort(),
+    ["score", "matchingSkills", "skillsNotDetected", "explanation", "nextStep", "scoreDescription"].sort());
+  assert.equal(result.structuredContent.score, 67);
+  assert.deepEqual(result.structuredContent.matchingSkills, ["ARIA", "Next.js", "Node.js", "Vitest"]);
+  assert.deepEqual(result.structuredContent.skillsNotDetected, ["Angular", "WCAG"]);
+  assert.deepEqual(result.content, [{ type: "text", text: JSON.stringify(result.structuredContent) }]);
+  assert.doesNotMatch(JSON.stringify(result), /Private resume|Private posting/);
+});
