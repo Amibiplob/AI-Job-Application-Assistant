@@ -38,11 +38,14 @@ export type JobSummary = {
   } | null;
   postedAt: string | null;
   source: string;
+  listingStatus: "demonstration" | "unverified";
+  listingDisclosure: string;
 };
 
 export type JobDetails = JobSummary & {
   description: string | null;
   jobUrl: string | null;
+  jobUrlDisclosure: string | null;
 };
 
 export type JobToolDependencies = {
@@ -51,6 +54,8 @@ export type JobToolDependencies = {
 };
 
 export function serializeJobSummary(job: Job): JobSummary {
+  // Match the website JobSourceBadge convention; keep the original source intact.
+  const demo = /^demo(?:[-_\s]|$)/i.test(job.source.trim());
   const hasSalary =
     job.salaryMin !== null ||
     job.salaryMax !== null ||
@@ -74,6 +79,10 @@ export function serializeJobSummary(job: Job): JobSummary {
       : null,
     postedAt: job.postedAt?.toISOString() ?? null,
     source: job.source,
+    listingStatus: demo ? "demonstration" : "unverified",
+    listingDisclosure: demo
+      ? "Demonstration data, not an active job vacancy. Demo listing URLs, including .test domains, are fictional and must not be used to apply for jobs."
+      : "Unverified listing. The employer and vacancy have not been verified; confirm availability independently before applying.",
   };
 }
 
@@ -89,10 +98,20 @@ function safeHttpUrl(value: string | null): string | null {
 }
 
 export function serializeJobDetails(job: Job): JobDetails {
+  const summary = serializeJobSummary(job);
+  const jobUrl = safeHttpUrl(job.jobUrl);
+  // A .test URL is fictional even when its source is not marked as a demo.
+  const hostname = jobUrl ? new URL(jobUrl).hostname.toLowerCase().replace(/\.$/, "") : "";
+  const fictional = summary.listingStatus === "demonstration" || hostname === "test" || hostname.endsWith(".test");
   return {
-    ...serializeJobSummary(job),
+    ...summary,
     description: job.description,
-    jobUrl: safeHttpUrl(job.jobUrl),
+    jobUrl,
+    jobUrlDisclosure: jobUrl
+      ? fictional
+        ? "Fictional listing URL; must not be used to apply for jobs."
+        : "Unverified listing URL. Confirm the destination and employer independently before sharing personal information or applying."
+      : null,
   };
 }
 

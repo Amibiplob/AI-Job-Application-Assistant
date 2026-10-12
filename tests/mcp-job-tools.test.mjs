@@ -117,6 +117,8 @@ test("serializes public summaries and details without internal fields", () => {
     },
     postedAt: "2026-01-02T03:04:05.000Z",
     source: job.source,
+    listingStatus: "unverified",
+    listingDisclosure: "Unverified listing. The employer and vacancy have not been verified; confirm availability independently before applying.",
   });
   assert.equal("externalId" in summary, false);
 
