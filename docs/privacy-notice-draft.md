@@ -1,13 +1,13 @@
 # Privacy notice draft
 
-**INTERNAL DRAFT - NOT APPROVED FOR PUBLICATION.** Phase 7D, Part 1.
+**INTERNAL DRAFT - NOT APPROVED FOR PUBLICATION.** Updated for Phase 7D.2.
 This is review material, not the service's published privacy notice or a legal
 compliance determination. Do not serve this document at `/privacy` or put its
-placeholders on customer-facing pages. No retention or production behavior is
-changed by this document.
+placeholders on customer-facing pages. This draft does not trigger deletion;
+the implemented safeguards are described in [retention operations](retention-operations.md).
 
-Evidence baseline: repository commit
-`8a5f2c23b4332949a793620e3645cefe19007be5`. Statements below describe reviewed code,
+Evidence baseline: Phase 7D.1 repository commit `6e7613b` plus the Phase 7D.2
+code changes described here. Statements below describe reviewed code,
 not an inspection of live user records, secrets, provider settings or contracts.
 The operator reports that Phase 7C is deployed and normal requests work; this
 document does not independently verify that deployment.
@@ -61,10 +61,20 @@ and timestamps in PostgreSQL. Its text can include whatever personal information
 the user chooses to provide, such as work history or contact details. These are
 text database columns; no application-level field encryption is implemented.
 
-The editor normally updates the displayed resume. The schema also allows
-multiple resume rows, and the website retrieves only the most recently updated
-one. Earlier rows are not automatically removed. This is not an implemented
-version-history feature or a guarantee that older copies have been erased.
+The editor updates the current resume in a transaction. Cooperating website
+writers lock the same owner row; identical first-save retries do not create
+duplicates, and a different stale create or older resume ID is rejected.
+After a validated current-resume replacement succeeds, other owned resume rows
+are removed in that same transaction. Failure rolls back the replacement/prune;
+an uncertain commit must be checked by refreshing before retrying.
+
+The schema still permits multiple legacy rows. The website displays the latest
+by update time, creation time and UUID. Reads/deployment do not remove them;
+they remain until a successful current-resume replacement or authorized deletion.
+New saves enforce a 200-character name and 50,000-character content limit,
+measured by JavaScript string length, without truncating content. Existing
+oversized resumes remain readable. This is not a version-history feature or
+proof that provider/backups no longer hold prior copies.
 
 Application tracking stores a user/job association, status, optional applied
 date, notes, internal UUID and timestamps. Users can update these fields; notes
@@ -83,8 +93,11 @@ user association, creation timestamp and expiry. The browser receives a
 lifetime is seven days. The cookie is HttpOnly, SameSite=Lax, path `/`, and
 Secure when `NODE_ENV` is `production`.
 
-Expired sessions do not authenticate. Expiration does not delete their database
-rows. Logout deletes the current session row and browser cookie, not every
+Expired sessions do not authenticate. Expiration itself does not delete their
+rows. A bounded operator-only cleanup utility now supports read-only dry-run
+and confirmed removal of rows expired at its database transaction-start cutoff.
+No scheduler is configured; periodic execution is an operator responsibility.
+Logout deletes the current session row and browser cookie, not every
 session for the account. Website account deletion removes all its session rows;
 remaining browser cookies cannot authenticate against the deleted rows.
 
@@ -197,15 +210,17 @@ certification guarantee is made in this draft.]
 
 ## Retention and deletion
 
-No approved general retention schedule is encoded in the reviewed application.
-Accounts, saved resumes, application records, expired session rows and unused
-rate-limit rows can remain until separately deleted. A session lifetime or
-rate-limit window is not a database retention period. See the proposal for the
-category-by-category decisions still required.
+The approved beta approach retains the current resume until deletion, removes
+superseded rows only after successful replacement, preserves applications until
+authorized deletion, and keeps seven-day session validity with periodic operator
+cleanup of expired rows. The resume transaction and bounded session utility are
+implemented, but no general inactivity purge or automatic scheduler is configured.
+Legacy rows, uncleaned expired sessions and unused limiter rows can remain.
+A session lifetime or limiter window is not a storage-erasure promise.
 
-[INTERNAL REVIEW: approve retention purposes, triggers, periods, exceptions,
-provider-copy handling and enforcement before replacing this paragraph with
-public commitments. No new numeric period has been selected.]
+[INTERNAL REVIEW: verify rollout, operator maintenance/cadence, remaining category
+purposes/triggers, exceptions and provider-copy handling before public commitments.
+Product approval does not settle log/backup retention or legal requirements.]
 
 An operator-only utility can delete one verified website user and cascade to
 all owned resumes, applications and sessions in a checked transaction. It
@@ -233,6 +248,12 @@ request fulfillment need separately approved operator workflows. Any identity
 evidence should be proportionate and minimized. Never ask a requester to email
 passwords, cookies, tokens or a full resume as proof of ownership.
 
+Privacy-request records have a provisional 90-day retention approach separate
+from application data; there is still no secure register/storage workflow in
+the application. [INTERNAL REVIEW: approve the clock start event, unresolved
+requests, any reviewed exceptions, access/disposal and restore-deletion linkage.
+Do not present this period as an implemented app rule or legal response deadline.]
+
 ## Security and notice changes
 
 Reviewed controls include Argon2id password hashing, restricted session-cookie
@@ -252,7 +273,8 @@ notifications before a working and approved notification process exists.]
 - Accounts/sessions: `app/signup/actions.ts`, `app/login/actions.ts`, `lib/auth.ts`,
   `migrations/001_initial_schema.sql`, `migrations/002_auth_sessions.sql`.
 - Stored workspace: `lib/resumes.ts`, `lib/applications.ts`,
-  `app/dashboard/resume/actions.ts`, `app/dashboard/applications/actions.ts`.
+  `lib/resume-validation.ts`, `app/dashboard/resume/actions.ts`,
+  `app/dashboard/applications/actions.ts`.
 - Website analysis: `app/dashboard/analyze/actions.ts`,
   `app/dashboard/jobs/[jobId]/actions.ts`, `lib/job-matching.ts`,
   `components/jobs/analysis-draft.tsx`, `app/dashboard/analyze/analyze-form.tsx`.
@@ -262,6 +284,9 @@ notifications before a working and approved notification process exists.]
   `migrations/003_rate_limits.sql`, `docs/abuse-protection.md`.
 - Deletion: `scripts/account-deletion.ts`,
   `scripts/delete-website-account.mjs`, `docs/manual-website-account-deletion.md`.
+- Session maintenance: `scripts/session-cleanup.ts`,
+  `scripts/cleanup-expired-sessions.mjs`, `docs/retention-operations.md`,
+  `tests/retention-safeguards.test.mjs`.
 - Existing disclosures: `app/page.tsx`, `app/connect/page.tsx`,
   `app/signup/page.tsx`, `app/dashboard/resume/page.tsx`.
 

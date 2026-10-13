@@ -25,6 +25,14 @@ test('resume action validates required fields without persistence', async () => 
  assert.deepEqual(Object.keys(result.errors),['name','content']);
  assert.equal(writes.length,0);assert.equal(invalidations.length,0);
 });
+test('oversized resume inputs return field errors and preserve drafts without writes', async () => {
+ writes=[];invalidations=[];
+ for(const [name,content,field] of [['x'.repeat(201),'React','name'],['Draft','x'.repeat(50001),'content']]) {
+  const result=await saveResume({},data(name,content,record.id));
+  assert.ok(result.errors[field]);assert.deepEqual(result.values,{name,content});assert.equal(result.saved,undefined);
+ }
+ assert.equal(writes.length,0);assert.equal(invalidations.length,0);
+});
 test('successful create/update preserve existing arguments and return the saved preview', async () => {
  mode='success';writes=[];invalidations=[];
  assert.deepEqual((await saveResume({},data(' New name ','React\nTypeScript'))).saved,{...record,name:'New name',content:'React\nTypeScript'});

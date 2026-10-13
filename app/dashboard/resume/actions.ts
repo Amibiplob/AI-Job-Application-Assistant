@@ -2,8 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createResume, updateResume } from "@/lib/resumes";
-
-type ResumeField = "name" | "content";
+import { validateResumeFields, type ResumeField } from "@/lib/resume-validation";
 
 export type SavedResume = { id: string; name: string; content: string };
 
@@ -29,15 +28,7 @@ export async function saveResume(
   const name = readText(formData, "name").trim();
   const content = readText(formData, "content");
   const resumeId = readText(formData, "resumeId");
-  const errors: Partial<Record<ResumeField, string>> = {};
-
-  if (!name) {
-    errors.name = "Enter a name for your resume.";
-  }
-
-  if (!content.trim()) {
-    errors.content = "Enter your resume content.";
-  }
+  const errors = validateResumeFields(name, content);
 
   if (Object.keys(errors).length > 0) {
     return { errors, values: { name, content } };
@@ -56,7 +47,7 @@ export async function saveResume(
     }
   } catch {
     return {
-      message: "We couldn't save your resume. Please try again.",
+      message: "We couldn't save your resume. Refresh the page and try again.",
       values: { name, content },
     };
   }

@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/presentation/empty-state";
 import { InlineFeedback } from "@/components/presentation/inline-feedback";
 import type { Resume } from "@/lib/resumes";
+import { RESUME_LIMITS } from "@/lib/resume-validation";
 import { saveResume, type ResumeFormState, type SavedResume } from "./actions";
 
 export function ResumeEditor({ resume }: { resume: Resume | null }) {
@@ -91,14 +92,14 @@ function ResumeForm({ resume, onCancel, onSaved }: { resume: SavedResume | null;
           {resume && <input type="hidden" name="resumeId" value={resume.id} />}
           <div className="space-y-2">
             <label htmlFor="resume-name" className="text-sm font-medium">Resume name <span className="text-text-secondary">(required)</span></label>
-            <Input ref={nameInput} autoFocus id="resume-name" name="name" required maxLength={200} value={name} onChange={event => setName(event.target.value)} readOnly={pending} aria-invalid={Boolean(state.errors?.name)} aria-describedby={`resume-name-help${state.errors?.name ? " resume-name-error" : ""}`} className="h-11 w-full min-w-0" />
+            <Input ref={nameInput} autoFocus id="resume-name" name="name" required maxLength={RESUME_LIMITS.name} value={name} onChange={event => setName(event.target.value)} readOnly={pending} aria-invalid={Boolean(state.errors?.name)} aria-describedby={`resume-name-help${state.errors?.name ? " resume-name-error" : ""}`} className="h-11 w-full min-w-0" />
             <p id="resume-name-help" className="text-xs leading-5 text-text-secondary">For example, “Software engineering resume”. Up to 200 characters.</p>
             {state.errors?.name && <p id="resume-name-error" className="text-sm text-error">{state.errors.name}</p>}
           </div>
           <div className="space-y-2">
             <label htmlFor="resume-content" className="text-sm font-medium">Resume content <span className="text-text-secondary">(required)</span></label>
             <Textarea ref={contentInput} id="resume-content" name="content" required rows={15} value={content} onChange={event => setContent(event.target.value)} readOnly={pending} aria-invalid={Boolean(state.errors?.content)} aria-describedby={`resume-content-help${state.errors?.content ? " resume-content-error" : ""}`} className="min-h-80 w-full min-w-0 resize-y text-sm leading-7" />
-            <p id="resume-content-help" className="text-xs leading-5 text-text-secondary">Plain text is supported. Your line breaks are preserved.</p>
+            <p id="resume-content-help" className="text-xs leading-5 text-text-secondary">{content.length.toLocaleString("en-US")} / {RESUME_LIMITS.content.toLocaleString("en-US")} characters. Your line breaks are preserved.</p>
             {state.errors?.content && <p id="resume-content-error" className="text-sm text-error">{state.errors.content}</p>}
           </div>
           {(state.message || state.errors) && <InlineFeedback tone="error" title={state.message ? "Resume not saved" : "Check your resume"}>{state.message ?? "Complete the required fields, then save again."} Your edits are still here.</InlineFeedback>}

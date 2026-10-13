@@ -18,10 +18,14 @@ const jobs = ['SAVED','APPLIED','INTERVIEW','OFFER','REJECTED','WITHDRAWN'].map(
 const applications=jobs.map((job,index)=>({...job,id:`20000000-0000-4000-8000-00000000000${index}`, job_id:job.id,status:['SAVED','APPLIED','INTERVIEW','OFFER','REJECTED','WITHDRAWN'][index],applied_at:null,notes:'Synthetic test notes',created_at:new Date(`2026-10-0${6-index}T12:00:00Z`),updated_at:date}));
 const resume={id:'30000000-0000-4000-8000-000000000000',name:'Engineering resume',content:'React, TypeScript, and Git experience.',created_at:date,updated_at:date};
 const resumeRecords = new Map([[populated, resume]]);
+pg.Pool.prototype.connect = async function() {
+ return {query:(sql,params)=>this.query(sql,params),release:()=>{}};
+};
 pg.Pool.prototype.query = async function(query,params=[]) {
  const sql=typeof query==='string'?query:query.text;
  let rows=[];
- if(/DELETE FROM sessions/.test(sql)) sessions.delete(params[0]);
+ if(/^(BEGIN|COMMIT|ROLLBACK|SET LOCAL)\b/.test(sql) || /DELETE FROM resumes/.test(sql)) rows=[];
+ else if(/DELETE FROM sessions/.test(sql)) sessions.delete(params[0]);
  else if(/FROM sessions/.test(sql)) { const uid=sessions.get(params[0]); if(uid) rows=[{id:params[0],user_id:uid,expires_at:new Date('2099-01-01T00:00:00Z')}]; }
  else if(/FROM users/.test(sql)) {if([...sessions.values()].includes(params[0])) rows=[{id:params[0],email:params[0]===populated?'alex@example.test':'new@example.test',name:params[0]===populated?'Alex Morgan':'New Member'}];}
  else if(/INSERT INTO resumes|UPDATE resumes/.test(sql)) { await new Promise(r=>setTimeout(r,600)); const update=/UPDATE/.test(sql); const uid=update?params[3]:params[0]; const name=update?params[0]:params[1]; const content=update?params[1]:params[2]; if(name==='FAIL_SAVE') throw Error('Synthetic write failure'); if(name!=='MISSING_RECORD' && (!update || resumeRecords.get(uid)?.id===params[2])) {const saved={...resume,id:update?params[2]:'40000000-0000-4000-8000-000000000000',name,content};resumeRecords.set(uid,saved); rows=[saved];} }

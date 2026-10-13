@@ -1,11 +1,12 @@
 # Privacy-request handling checklist
 
-**INTERNAL OPERATOR PREPARATION - verification method, contact and retention
-still need approval.** Phase 7D, Part 1. This checklist creates no public endpoint,
+**INTERNAL OPERATOR PREPARATION - verification method, contact and secure register
+still need approval.** Updated for Phase 7D.2. This checklist creates no public endpoint,
 export service, email integration or authority to delete an account.
 
-The technical baseline is `8a5f2c23b4332949a793620e3645cefe19007be5`. Use this
-alongside [manual website account deletion](manual-website-account-deletion.md).
+The Phase 7D.1 baseline is `6e7613b`, updated with the
+[Phase 7D.2 safeguards](retention-operations.md). Use this alongside
+[manual website account deletion](manual-website-account-deletion.md).
 No live deletion or live dry-run was performed while preparing these documents.
 
 ## What is implemented and what is missing
@@ -34,7 +35,10 @@ no response deadline or legal entitlement.
   There is no automated export/profile-edit workflow. Do not promise one before
   the manual workflow is approved and tested.
 - [ ] Define a restricted register, minimal fields, access, retention and secure
-  delivery method. Minimize verification evidence; do not retain identity
+  delivery method. The request-record approach is provisionally 90 days, separate
+  from application data. Approve its start event, unresolved-request treatment,
+  reviewed exceptions and protected restore linkage before collection. No new
+  request storage or automatic disposal is implemented. Minimize evidence; do not retain identity
   documents by default or copy personal content into general logs/Git/issues.
 - [ ] Restrict operator machine, repository/script execution and database
   credentials to authorized operators. Use a separate approved operator role:
@@ -132,9 +136,11 @@ no response deadline or legal entitlement.
 - Auth0 and client records, provider logs, backups/PITR, branches, exports and
   request/support records need their own authorized handling. Some systems may
   offer expiry rather than selective deletion; verify, do not assume.
-- Retention and request-register storage are proposals until approved. Do not
-  communicate guaranteed durations, complete erasure or compliance without
-  evidence and applicable review.
+- Resume replacement and manual expired-session maintenance are approved and
+  implemented as scoped safeguards, not provider erasure. The provisional 90-day
+  request-record approach still needs a secure workflow, clock start and exception
+  review. Do not apply it to accounts/resumes/applications, or communicate complete
+  erasure, implemented register disposal or compliance without evidence/review.
 
 ## Technical evidence
 

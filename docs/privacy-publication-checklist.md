@@ -1,7 +1,7 @@
 # Privacy publication checklist
 
 **INTERNAL RELEASE GATE - `/privacy` IS NOT CREATED BY THIS PHASE.**
-Phase 7D, Part 1. All items below require evidence/approval; unchecked items are
+Updated for Phase 7D.2. All items below require evidence/approval; unchecked items are
 not completed merely by committing these documents. No placeholder belongs on
 a customer-facing page.
 
@@ -9,8 +9,9 @@ Review [notice draft](privacy-notice-draft.md),
 [retention proposal](data-retention-proposal.md),
 [request handling](privacy-request-handling-checklist.md) and
 [existing deletion procedure](manual-website-account-deletion.md) together.
-The evidence baseline is `8a5f2c23b4332949a793620e3645cefe19007be5`; reconfirm any
-behavior changed after that commit. Provider settings/contracts were not audited.
+The Phase 7D.1 baseline is `6e7613b`, updated with the
+[retention safeguards](retention-operations.md); reconfirm later code/deployment
+changes. Provider settings/contracts were not audited.
 
 ## Decisions the operator must make manually
 
@@ -27,14 +28,18 @@ behavior changed after that commit. Provider settings/contracts were not audited
   processing purposes/bases, cookie requirements, user rights, response periods,
   exceptions and international processing. No blanket GDPR/other-law compliance
   statement or universal right/deadline is approved by these drafts.
-- [ ] Approve retention per category: purpose, trigger, duration or objective
+- [ ] Record approved resume replacement, seven-day validity/periodic operator
+  session cleanup and unchanged application/analysis boundaries. Approve remaining
+  retention per category: purpose, trigger, duration or objective
   criterion, exceptions, responsible operator and actual enforcement. Include
   older resumes, expired sessions, unused counters, provider logs, Auth0,
   backups/branches/exports and privacy-request records. Do not mistake access
   expiry or bounded storage for deletion.
 - [ ] Approve a usable requester-verification procedure, website/Auth0 scope
   separation, secure access/export delivery and a restricted request register.
-  Define how uncertain commits, provider failures and lost-access requests work.
+  The request-record approach is provisionally 90 days only; approve start event,
+  unresolved requests, reviewed exceptions and restore linkage without adding
+  insecure storage. Define uncertain commits, provider failures and lost access.
 - [ ] Approve access controls for operator credentials/roles and records. Verify
   the dedicated deletion connection is not exposed to app handlers/customers.
 - [ ] Approve version/effective-date control and any required user-notification
@@ -70,7 +75,9 @@ behavior changed after that commit. Provider settings/contracts were not audited
 
 - [ ] For each approved rule, implement and test a mechanism in a separate change
   or establish an assigned, documented manual process that can meet it. This
-  phase implements no scheduled cleanup, automatic deletion or new period.
+  Phase 7D.2 implements transactional resume pruning on successful user saves and
+  a bounded manual session utility. No scheduler or privacy-request store exists;
+  operational role review/maintenance and remaining policy decisions are still needed.
 - [ ] Rehearse the complete privacy-request workflow on synthetic isolated data:
   authorization, approved scope, target verification, count-only dry-run,
   confirmed deletion, zero-count check and minimal outcome recording.
@@ -134,8 +141,9 @@ git diff --check
 The DB tests need local PostgreSQL 16 server binaries; optionally set
 `ACCOUNT_DELETION_TEST_POSTGRES_BIN` to a reviewed local distribution. They do not
 accept `DATABASE_URL` as a test target. Use synthetic build configuration when
-possible; do not run migration, seed, connection-check or deletion scripts as
-part of documentation verification.
+possible; do not run standalone migration, seed, connection-check, deletion or
+session cleanup scripts against live databases as part of verification. Synthetic
+isolated tests may exercise the operator CLI without accessing live data.
 
 - [ ] When the public page/links are implemented later, add focused route/link
   tests and manually check signed-out/signed-in navigation, mobile/desktop
@@ -149,7 +157,8 @@ part of documentation verification.
 ## Publication decision
 
 **Not ready to publish from this preparation alone.** Operator identity/contact,
-approved retention, applicable review, provider/backup verification and a working
+remaining retention decisions, applicable review, provider/backup verification and a working
 privacy-request process are unresolved gates. Public policy/link work is a later
-task. This documentation commit preserves the existing website and MCP behavior;
-it does not certify beta privacy readiness or production provider configuration.
+task. The new safeguards change only resume-save retention and add manual expired-
+session tooling; authentication/MCP contracts remain unchanged. They do not
+certify beta privacy readiness or production provider configuration.
