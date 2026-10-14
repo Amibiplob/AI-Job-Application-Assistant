@@ -11,6 +11,8 @@ import { StatusBadge } from "@/components/presentation/status-badge";
 import { JobSourceBadge } from "@/components/presentation/job-source-badge";
 import { cn } from "@/lib/utils";
 import { getOverviewSummary } from "./overview-model";
+import { MonthlyMatchUsage } from "./monthly-match-usage";
+import type { Usage } from "@/lib/monetization/store";
 
 const linkFocus = "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus";
 const actionClass = cn(buttonVariants(), "h-11 rounded-xl px-4");
@@ -22,10 +24,11 @@ const quickActions = [
 ];
 const resumeLabels = { ready: "Ready to compare", missing: "Not added yet", empty: "Add resume text", unavailable: "Unavailable" };
 
-export function DashboardOverview({ resume, applications, resumeUnavailable = false }: {
+export function DashboardOverview({ resume, applications, resumeUnavailable = false, usage = null }: {
   resume: Resume | null;
   applications: readonly Application[] | null;
   resumeUnavailable?: boolean;
+  usage?: Usage | null;
 }) {
   const summary = getOverviewSummary(resume, applications, resumeUnavailable);
 
@@ -37,6 +40,8 @@ export function DashboardOverview({ resume, applications, resumeUnavailable = fa
         description="A summary of your saved resume and the roles you’re tracking."
         actions={<Link href="/dashboard/jobs" className={actionClass}>Browse jobs <ArrowRight aria-hidden="true" /></Link>}
       />
+
+      <MonthlyMatchUsage usage={usage} />
 
       <section aria-label="Workspace summary" className="grid gap-4 md:grid-cols-2">
         <Card className="gap-0 py-0 ring-border shadow-subtle">

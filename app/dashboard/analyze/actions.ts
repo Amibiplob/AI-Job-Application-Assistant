@@ -9,13 +9,17 @@ import {
   type JobDescriptionField,
 } from "@/lib/job-matching";
 import { getResume } from "@/lib/resumes";
+import { runWithCurrentUserMonthlyUsage } from "@/lib/monetization/current-user";
+import { MATCH_QUOTA_EXHAUSTED_MESSAGE } from "@/lib/monetization/messages";
+import type { Usage } from "@/lib/monetization/store";
 
 export type AnalyzeJobDescriptionState = {
-  status: "idle" | "success" | "invalid" | "no-resume" | "empty-resume" | "error";
+  status: "idle" | "success" | "invalid" | "no-resume" | "empty-resume" | "quota-exhausted" | "error";
   errors?: Partial<Record<JobDescriptionField, string>>;
   values?: { title: string; company: string; description: string };
   analysis?: JobDescriptionAnalysis;
   message?: string;
+  usage?: Usage;
 };
 
 function readField(formData: FormData, field: JobDescriptionField): string {
@@ -55,10 +59,16 @@ export async function analyzeJobDescription(
       };
     }
 
+    const match = await runWithCurrentUserMonthlyUsage("job_analysis", () =>
+      analyzeJobDescriptionAgainstResume(resume.content, parsed.data.description));
+    if (!match.allowed) {
+      return { status: "quota-exhausted", values: parsed.data, message: MATCH_QUOTA_EXHAUSTED_MESSAGE, usage: match.usage };
+    }
     return {
       status: "success",
       values: parsed.data,
-      analysis: analyzeJobDescriptionAgainstResume(resume.content, parsed.data.description),
+      analysis: match.value,
+      usage: match.usage,
     };
   } catch {
     return {

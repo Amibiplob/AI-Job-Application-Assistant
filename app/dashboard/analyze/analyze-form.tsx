@@ -12,6 +12,7 @@ import { useAnalysisDraft } from "@/components/jobs/analysis-draft";
 import { AnalysisResults } from "@/components/jobs/analysis-results";
 import { JOB_DESCRIPTION_LIMITS, type JobDescriptionInput } from "@/lib/job-matching";
 import { analyzeJobDescription, type AnalyzeJobDescriptionState } from "./actions";
+import { MonthlyMatchUsage } from "@/components/dashboard/monthly-match-usage";
 
 const initialState: AnalyzeJobDescriptionState = { status: "idle" };
 
@@ -69,8 +70,10 @@ export function AnalyzeForm() {
           </>}
           {state.status === "invalid" && <InlineFeedback tone="error" title="Check the job details" className="mt-5">Review the highlighted fields. Your input has been kept.</InlineFeedback>}
           {state.status === "error" && <InlineFeedback tone="error" title="Analysis unavailable" className="mt-5">{state.message} Your input has been kept; try again.</InlineFeedback>}
+          {state.status === "quota-exhausted" && <InlineFeedback tone="info" title="Monthly allowance used up" className="mt-5">{state.message} Your input has been kept.</InlineFeedback>}
           {(state.status === "no-resume" || state.status === "empty-resume") && <InlineFeedback title="Add resume content first" className="mt-5">{state.message ?? "Save a resume before comparing this role."} <Link href="/dashboard/resume" className="rounded-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-focus">Open your resume workspace</Link>.</InlineFeedback>}
         </CardContent></Card>
+        {state.usage && <MonthlyMatchUsage usage={state.usage} />}
         <InlineFeedback announcement="off" title="How to read the results">The denominator contains only job-description skills recognized by the dictionary. Accessibility and responsive-design requirements may not be recognized unless included in that dictionary. Review the full role requirements yourself.</InlineFeedback>
       </div>
     </div>

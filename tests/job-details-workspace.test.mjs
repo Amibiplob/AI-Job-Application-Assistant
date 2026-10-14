@@ -8,6 +8,7 @@ const Module=require('node:module');const original=Module._load;
 let authenticated=true,job=null,resume=null,queryFailed=false,trackingMode='added',reads=[],sqlCalls=[];
 Module._load=function(id,...args){
  if(id==='server-only')return {};
+ if(id==='@/lib/monetization/current-user')return {runWithCurrentUserMonthlyUsage:async(_metric,operation)=>({allowed:true,value:await operation(),usage:{plan:'free',used:1,limit:3,remaining:2,monthStart:'2026-10-01',resetsAt:'2026-11-01T00:00:00.000Z'}})};
  if(id==='@/lib/auth')return {getCurrentUser:async()=>authenticated?{id:'synthetic-user'}:null,getSession:async()=>authenticated?{userId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'}:null};
  if(id==='@/lib/jobs')return {getJobById:async()=>{reads.push('job');if(queryFailed)throw Error('Synthetic read failure');return job;}};
  if(id==='@/lib/resumes')return {getResume:async()=>{reads.push('resume');return resume;}};

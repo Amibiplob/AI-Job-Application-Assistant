@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getCurrentUser } from "@/lib/auth";
+import { revalidatePath } from "next/cache";
 import { pool } from "@/lib/db/pool";
 import { createMonetizationStore, type UsageMetric } from "@/lib/monetization/store";
 
@@ -29,4 +30,14 @@ export async function getCurrentUserMonthlyUsage(metric: UsageMetric) {
 
 export async function consumeCurrentUserMonthlyUsage(metric: UsageMetric) {
   return store.consumeMonthlyUsage(await requireUserId(), metric);
+}
+
+export async function runWithCurrentUserMonthlyUsage<T>(metric: UsageMetric, operation: () => T | Promise<T>) {
+  const result = await store.runWithMonthlyUsage(await requireUserId(), metric, operation);
+  if (result.allowed) {
+    // Accounting is already committed. Cache invalidation failure must not turn
+    // a completed match into an apparent failed operation with a consumed unit.
+    try { revalidatePath("/dashboard"); } catch { /* A page refresh reads current usage. */ }
+  }
+  return result;
 }

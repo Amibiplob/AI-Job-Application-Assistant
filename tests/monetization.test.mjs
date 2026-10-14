@@ -94,7 +94,7 @@ test("existing users are Free; UTC month snapshot is read-only and tenant scoped
   const snapshot = await store.getMonthlyUsage(userId, "job_analysis");
   const clock = (await pool.query("SELECT to_char(date_trunc('month',statement_timestamp() AT TIME ZONE 'UTC'),'YYYY-MM-DD') AS month")).rows[0];
   assert.equal(snapshot.monthStart, clock.month);
-  assert.equal(snapshot.used, 0); assert.equal(snapshot.remaining, 10);
+  assert.equal(snapshot.used, 0); assert.equal(snapshot.remaining, 3);
   assert.match(snapshot.resetsAt, /^\d{4}-\d{2}-01T00:00:00.000Z$/);
   assert.equal((await pool.query("SELECT count(*)::int AS count FROM monthly_usage")).rows[0].count, 0);
   await store.consumeMonthlyUsage(otherId, "job_analysis", 3);
@@ -126,21 +126,21 @@ test("only current active or trialing Pro periods grant Pro; cancellation at per
 test("concurrent instances admit exactly Free budget and never increment on denial", async () => {
   const stores = Array.from({ length: 4 }, () => createMonetizationStore(pool));
   const results = await Promise.all(Array.from({ length: 40 }, (_, i) => stores[i % 4].consumeMonthlyUsage(userId, "job_analysis")));
-  assert.equal(results.filter(result => result.allowed).length, 10);
+  assert.equal(results.filter(result => result.allowed).length, 3);
   const before = (await pool.query("SELECT * FROM monthly_usage")).rows;
   assert.equal((await store.consumeMonthlyUsage(userId, "job_analysis")).allowed, false);
   assert.deepEqual((await pool.query("SELECT * FROM monthly_usage")).rows, before);
-  assert.equal(before[0].used, 10);
+  assert.equal(before[0].used, 3);
 });
 
 test("concurrent Pro admission stops at its budget and serializes with a locked downgrade", async () => {
   await subscription();
-  await store.consumeMonthlyUsage(userId, "job_analysis", 190);
+  await store.consumeMonthlyUsage(userId, "job_analysis", 90);
   const results = await Promise.all(Array.from({ length: 30 }, () => store.consumeMonthlyUsage(userId, "job_analysis")));
   assert.equal(results.filter(result => result.allowed).length, 10);
-  assert.equal((await store.getMonthlyUsage(userId, "job_analysis")).used, 200);
+  assert.equal((await store.getMonthlyUsage(userId, "job_analysis")).used, 100);
   await pool.query("DELETE FROM monthly_usage WHERE user_id=$1", [userId]);
-  await store.consumeMonthlyUsage(userId, "job_analysis", 10);
+  await store.consumeMonthlyUsage(userId, "job_analysis", 3);
   const writer = await pool.connect();
   try {
     await writer.query("BEGIN");
@@ -150,21 +150,21 @@ test("concurrent Pro admission stops at its budget and serializes with a locked 
     await writer.query("COMMIT");
     const decision = await pending;
     assert.equal(decision.allowed, false); assert.equal(decision.plan, "free");
-    assert.equal(decision.used, 10);
+    assert.equal(decision.used, 3);
   } finally { await writer.query("ROLLBACK"); writer.release(); }
 });
 
 test("batched use, upgrades, downgrades and UTC month rollover preserve counters", async () => {
-  assert.equal((await store.consumeMonthlyUsage(userId, "job_analysis", 11)).allowed, false);
+  assert.equal((await store.consumeMonthlyUsage(userId, "job_analysis", 4)).allowed, false);
   assert.equal((await pool.query("SELECT count(*)::int AS count FROM monthly_usage")).rows[0].count, 0);
-  await store.consumeMonthlyUsage(userId, "job_analysis", 10);
+  await store.consumeMonthlyUsage(userId, "job_analysis", 3);
   await subscription();
-  const pro = await store.consumeMonthlyUsage(userId, "job_analysis", 190);
-  assert.equal(pro.allowed, true); assert.equal(pro.used, 200); assert.equal(pro.remaining, 0);
+  const pro = await store.consumeMonthlyUsage(userId, "job_analysis", 97);
+  assert.equal(pro.allowed, true); assert.equal(pro.used, 100); assert.equal(pro.remaining, 0);
   assert.equal((await store.consumeMonthlyUsage(userId, "job_analysis")).allowed, false);
   await subscription("past_due");
   const downgraded = await store.consumeMonthlyUsage(userId, "job_analysis");
-  assert.equal(downgraded.allowed, false); assert.equal(downgraded.used, 200); assert.equal(downgraded.remaining, 0);
+  assert.equal(downgraded.allowed, false); assert.equal(downgraded.used, 100); assert.equal(downgraded.remaining, 0);
   await pool.query("UPDATE monthly_usage SET month_start=(month_start-interval '1 month')::date");
   const renewed = await store.consumeMonthlyUsage(userId, "job_analysis");
   assert.equal(renewed.allowed, true); assert.equal(renewed.used, 1);
@@ -175,7 +175,7 @@ test("invalid identities, metrics and amounts fail before database access; missi
   const noDb = createMonetizationStore({ query() { assert.fail("Unexpected query"); }, connect() { assert.fail("Unexpected connect"); } });
   for (const id of [undefined, "", "auth0|subject", "a@example.test", "x' OR true--"]) await assert.rejects(noDb.getEntitlement(id));
   for (const metric of ["__proto__", "anything", null]) await assert.rejects(noDb.consumeMonthlyUsage(userId, metric));
-  for (const amount of [0, -1, 1.5, NaN, Infinity, 201, "1"]) await assert.rejects(noDb.consumeMonthlyUsage(userId, "job_analysis", amount));
+  for (const amount of [0, -1, 1.5, NaN, Infinity, 101, "1"]) await assert.rejects(noDb.consumeMonthlyUsage(userId, "job_analysis", amount));
   const missing = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   await assert.rejects(store.getEntitlement(missing), /unavailable/);
   await assert.rejects(store.consumeMonthlyUsage(missing, "job_analysis"), /could not be confirmed/);
@@ -185,6 +185,7 @@ test("website helpers use only the authenticated user; unauthenticated and Free 
   currentUser = null;
   await assert.rejects(website.getCurrentUserEntitlement(), /Authentication required/);
   await assert.rejects(website.consumeCurrentUserMonthlyUsage("job_analysis"), /Authentication required/);
+  await assert.rejects(website.runWithCurrentUserMonthlyUsage("job_analysis", () => assert.fail("Unauthenticated computation")), /Authentication required/);
   currentUser = { id: userId };
   await assert.rejects(website.requireCurrentUserPro(), /Pro subscription required/);
   await subscription();
@@ -194,6 +195,25 @@ test("website helpers use only the authenticated user; unauthenticated and Free 
   currentUser = { id: otherId };
   assert.equal((await website.getCurrentUserMonthlyUsage("job_analysis")).used, 0);
   assert.equal((await website.getCurrentUserEntitlement()).plan, "free");
+});
+
+test("a failed in-flight match rolls back its reservation before concurrent callers take the last unit", async () => {
+  await store.consumeMonthlyUsage(userId, "job_analysis", 2);
+  let entered, release;
+  const started = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const failed = assert.rejects(store.runWithMonthlyUsage(userId, "job_analysis", async () => {
+    entered(); await gate; throw Error("Private synthetic matching text");
+  }), error => !/Private|synthetic/.test(error.message));
+  await started;
+  const pending = Promise.all(Array.from({ length: 5 }, () => store.runWithMonthlyUsage(userId, "job_analysis", () => "completed")));
+  try { assert.equal((await store.getMonthlyUsage(userId, "job_analysis")).used, 2); }
+  finally { release(); }
+  await failed;
+  const results = await pending;
+  assert.equal(results.filter(result => result.allowed).length, 1);
+  assert.equal(results.find(result => result.allowed).value, "completed");
+  assert.equal((await store.getMonthlyUsage(userId, "job_analysis")).used, 3);
 });
 
 test("billing deduplication is concurrent, provider scoped and atomic with entitlement updates", async () => {

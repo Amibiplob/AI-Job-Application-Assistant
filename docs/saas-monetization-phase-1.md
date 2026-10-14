@@ -1,5 +1,9 @@
 # SaaS monetization Phase 1
 
+This document records the Phase 1 foundation at commit `2f3c607`. The current
+website policy and enforcement are described in [Phase 2](saas-monetization-phase-2.md),
+which supersedes the original admission limits and attempt-counting guidance below.
+
 This phase adds internal subscription, usage and billing-event foundations. No
 payments, webhooks, checkout, pricing UI, authentication changes or automatic
 database migration are included. Existing website actions and MCP tools do not

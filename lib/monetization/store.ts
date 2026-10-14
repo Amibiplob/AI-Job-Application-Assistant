@@ -4,13 +4,16 @@ import type { Pool, PoolClient } from "pg";
 
 export type Plan = "free" | "pro";
 export type UsageMetric = "job_analysis";
-// Phase 1 internal policy, not published pricing. Never take limits from a client.
+// Provisional website policy. Never take limits from a client.
 export const MONTHLY_LIMITS = Object.freeze({
-  free: Object.freeze({ job_analysis: 10 }),
-  pro: Object.freeze({ job_analysis: 200 }),
+  free: Object.freeze({ job_analysis: 3 }),
+  pro: Object.freeze({ job_analysis: 100 }),
 });
 export type Entitlement = { plan: Plan; monthlyLimits: typeof MONTHLY_LIMITS[Plan] };
 export type Usage = { plan: Plan; used: number; limit: number; remaining: number; monthStart: string; resetsAt: string };
+export type MeteredResult<T> =
+  | { allowed: true; value: T; usage: Usage }
+  | { allowed: false; usage: Usage };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const entitlementSql = `SELECT CASE WHEN e.plan = 'pro'
@@ -52,6 +55,8 @@ export function createMonetizationStore(db: Pick<Pool, "query" | "connect">) {
     try {
       client = await db.connect();
       await client.query("BEGIN");
+      await client.query("SET LOCAL lock_timeout='5s'");
+      await client.query("SET LOCAL statement_timeout='15s'");
       const result = await operation(client);
       await client.query("COMMIT");
       committed = true;
@@ -64,6 +69,26 @@ export function createMonetizationStore(db: Pick<Pool, "query" | "connect">) {
     } finally {
       client?.release(!committed);
     }
+  }
+
+  async function admit(client: PoolClient, userId: string, metric: UsageMetric, amount: number) {
+    // Serialize admissions and entitlement writers across processes. The same
+    // owner lock is already used by resume writers and protects against deletion.
+    const owner = await client.query("SELECT id FROM public.users WHERE id = $1::uuid FOR UPDATE", [userId]);
+    if (!owner.rowCount) throw new Error("Account unavailable.");
+    const row = await readEntitlement(client, userId);
+    const limit = MONTHLY_LIMITS[row.plan][metric];
+    const result = await client.query<{ used: number }>(`INSERT INTO public.monthly_usage (user_id, metric, month_start, used)
+      SELECT $1::uuid, $2, $3::date, $4::int WHERE $4::int <= $5::int
+      ON CONFLICT (user_id, metric, month_start) DO UPDATE
+      SET used = monthly_usage.used + EXCLUDED.used, updated_at = statement_timestamp()
+      WHERE monthly_usage.used <= $5::int - EXCLUDED.used RETURNING used`,
+    [userId, metric, row.month_start, amount, limit]);
+    const allowed = result.rows.length === 1;
+    const used = allowed ? result.rows[0].used : (await client.query<{ used: number }>(
+      "SELECT used FROM public.monthly_usage WHERE user_id=$1::uuid AND metric=$2 AND month_start=$3::date",
+      [userId, metric, row.month_start])).rows[0]?.used ?? 0;
+    return { ...usage(row, used), allowed };
   }
 
   return {
@@ -91,25 +116,22 @@ export function createMonetizationStore(db: Pick<Pool, "query" | "connect">) {
 
     async consumeMonthlyUsage(userId: string, metric: UsageMetric, amount = 1): Promise<Usage & { allowed: boolean }> {
       validateUser(userId); validateMetric(metric);
-      if (!Number.isSafeInteger(amount) || amount < 1 || amount > 200) throw new Error("Invalid usage amount.");
+      if (!Number.isSafeInteger(amount) || amount < 1 || amount > MONTHLY_LIMITS.pro[metric]) throw new Error("Invalid usage amount.");
+      return transaction(client => admit(client, userId, metric, amount));
+    },
+
+    /** Run local matching inside the admission transaction. A thrown/rejected
+     * computation rolls back its unit; denied work is never executed. Callbacks
+     * must not perform external side effects or acquire another owner connection.
+     * A successful commit counts even if the response is subsequently lost. */
+    async runWithMonthlyUsage<T>(userId: string, metric: UsageMetric, operation: () => T | Promise<T>): Promise<MeteredResult<T>> {
+      validateUser(userId); validateMetric(metric);
+      if (typeof operation !== "function") throw new Error("A matching operation is required.");
       return transaction(async client => {
-        // Serialize this user's admissions across processes; hold the lock through
-        // entitlement read + counter mutation and protect against account deletion.
-        const owner = await client.query("SELECT id FROM public.users WHERE id = $1::uuid FOR UPDATE", [userId]);
-        if (!owner.rowCount) throw new Error("Account unavailable.");
-        const row = await readEntitlement(client, userId);
-        const limit = MONTHLY_LIMITS[row.plan][metric];
-        const result = await client.query<{ used: number }>(`INSERT INTO public.monthly_usage (user_id, metric, month_start, used)
-          SELECT $1::uuid, $2, $3::date, $4::int WHERE $4::int <= $5::int
-          ON CONFLICT (user_id, metric, month_start) DO UPDATE
-          SET used = monthly_usage.used + EXCLUDED.used, updated_at = statement_timestamp()
-          WHERE monthly_usage.used <= $5::int - EXCLUDED.used RETURNING used`,
-        [userId, metric, row.month_start, amount, limit]);
-        const allowed = result.rows.length === 1;
-        const used = allowed ? result.rows[0].used : (await client.query<{ used: number }>(
-          "SELECT used FROM public.monthly_usage WHERE user_id=$1::uuid AND metric=$2 AND month_start=$3::date",
-          [userId, metric, row.month_start])).rows[0]?.used ?? 0;
-        return { ...usage(row, used), allowed };
+        const { allowed, ...snapshot } = await admit(client, userId, metric, 1);
+        if (!allowed) return { allowed: false as const, usage: snapshot };
+        const value = await operation();
+        return { allowed: true as const, value, usage: snapshot };
       });
     },
 

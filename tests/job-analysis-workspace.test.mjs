@@ -6,6 +6,7 @@ const Module=require('node:module');const original=Module._load;
 let authenticated=true,resume=null,failed=false,reads=0,queries=[];
 Module._load=function(id,...args){
  if(id==='server-only')return {};
+ if(id==='@/lib/monetization/current-user')return {runWithCurrentUserMonthlyUsage:async(_metric,operation)=>({allowed:true,value:await operation(),usage:{plan:'free',used:1,limit:3,remaining:2,monthStart:'2026-10-01',resetsAt:'2026-11-01T00:00:00.000Z'}})};
  if(id==='@/lib/auth')return {getCurrentUser:async()=>authenticated?{id:'synthetic'}:null,getSession:async()=>authenticated?{userId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'}:null};
  if(id==='@/lib/resumes')return {getResume:async()=>{reads++;if(failed)throw Error('Synthetic');return resume;}};
  if(id==='@/lib/db/pool')return {pool:{query:async(sql,values)=>{queries.push({sql,values});return {rows:[]};}}};
