@@ -2,8 +2,8 @@ import type { PoolClient } from "pg";
 
 // Operator tooling only: never import this module from app/, lib/, or MCP tools.
 export type DeletionOptions = { userId: string; databaseName: string; mode: "dry-run" | "delete"; confirmation?: string };
-type Counts = { users: number; resumes: number; applications: number; sessions: number; subscription_entitlements?: number; monthly_usage?: number };
-type MonetizationTable = "subscription_entitlements" | "monthly_usage";
+type Counts = { users: number; resumes: number; applications: number; sessions: number; subscription_entitlements?: number; monthly_usage?: number; external_identities?: number };
+type SupplementalTable = "subscription_entitlements" | "monthly_usage" | "external_identities";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export function parseDeletionArguments(args: string[]): DeletionOptions {
@@ -37,11 +37,11 @@ export function parseDeletionArguments(args: string[]): DeletionOptions {
   return { userId, databaseName, mode, ...(mode === "delete" ? { confirmation: values.get("--confirm") } : {}) };
 }
 
-async function lockMonetizationTables(client: PoolClient, mode: DeletionOptions["mode"]): Promise<MonetizationTable[]> {
+async function lockSupplementalTables(client: PoolClient, mode: DeletionOptions["mode"]): Promise<SupplementalTable[]> {
   const result = await client.query(`SELECT c.relname FROM pg_catalog.pg_class c
     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relname IN ('subscription_entitlements','monthly_usage')`);
-  const tables: MonetizationTable[] = result.rows.map(row => row.relname);
+    WHERE n.nspname='public' AND c.relname IN ('subscription_entitlements','monthly_usage','external_identities')`);
+  const tables: SupplementalTable[] = result.rows.map(row => row.relname);
   // Names originate only from the fixed catalog allowlist above.
   for (const table of tables) {
     await client.query(`LOCK TABLE public.${table} IN ${mode === "delete" ? "SHARE ROW EXCLUSIVE" : "ACCESS SHARE"} MODE`);
@@ -49,7 +49,7 @@ async function lockMonetizationTables(client: PoolClient, mode: DeletionOptions[
   return tables;
 }
 
-async function verifySchema(client: PoolClient, monetizationTables: MonetizationTable[]) {
+async function verifySchema(client: PoolClient, supplementalTables: SupplementalTable[]) {
   const relations = await client.query(`
     SELECT c.relname, c.relkind, c.relrowsecurity, c.relforcerowsecurity,
       EXISTS (SELECT 1 FROM pg_catalog.pg_inherits i WHERE i.inhrelid=c.oid OR i.inhparent=c.oid) AS inherited,
@@ -82,12 +82,13 @@ async function verifySchema(client: PoolClient, monetizationTables: Monetization
       JOIN pg_catalog.pg_attribute a ON a.attrelid=p.conrelid AND a.attnum=k.num
       WHERE p.conrelid=c.oid AND p.contype='p' AND NOT p.condeferrable AND p.convalidated ORDER BY k.ord) AS primary_columns
     FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relname=ANY($1::text[])`, [monetizationTables]);
-  if (monetization.rows.length !== monetizationTables.length || monetization.rows.some(row =>
+    WHERE n.nspname='public' AND c.relname=ANY($1::text[])`, [supplementalTables]);
+  const expectedPrimaryKey = { subscription_entitlements: "user_id", monthly_usage: "user_id,metric,month_start", external_identities: "id" };
+  if (monetization.rows.length !== supplementalTables.length || monetization.rows.some(row =>
     row.relkind !== "r" || row.relrowsecurity || row.relforcerowsecurity || row.inherited ||
     row.unsafe_triggers || row.rules || !row.uuid_owner || row.primary_columns.join(",") !==
-      (row.relname === "subscription_entitlements" ? "user_id" : "user_id,metric,month_start"))) {
-    throw new Error("Unsafe monetization table structure; deletion refused.");
+      expectedPrimaryKey[row.relname as SupplementalTable])) {
+    throw new Error("Unsafe supplemental table structure; deletion refused.");
   }
   // Inspect all incoming AND outgoing foreign keys, across all schemas. Extra
   // dependencies can cascade into unreviewed data and must stop this utility.
@@ -102,11 +103,11 @@ async function verifySchema(client: PoolClient, monetizationTables: Monetization
     JOIN pg_catalog.pg_class c ON c.oid=f.conrelid JOIN pg_catalog.pg_namespace ns ON ns.oid=c.relnamespace
     JOIN pg_catalog.pg_class r ON r.oid=f.confrelid JOIN pg_catalog.pg_namespace nr ON nr.oid=r.relnamespace
     WHERE f.contype='f' AND (
-      (ns.nspname='public' AND c.relname IN ('users','resumes','applications','sessions','jobs','subscription_entitlements','monthly_usage')) OR
-      (nr.nspname='public' AND r.relname IN ('users','resumes','applications','sessions','jobs','subscription_entitlements','monthly_usage')))
+      (ns.nspname='public' AND c.relname IN ('users','resumes','applications','sessions','jobs','subscription_entitlements','monthly_usage','external_identities')) OR
+      (nr.nspname='public' AND r.relname IN ('users','resumes','applications','sessions','jobs','subscription_entitlements','monthly_usage','external_identities')))
   `);
   const expected = new Set(["resumes:user_id:users:c", "applications:user_id:users:c", "sessions:user_id:users:c", "applications:job_id:jobs:a"]);
-  for (const table of monetizationTables) expected.add(`${table}:user_id:users:c`);
+  for (const table of supplementalTables) expected.add(`${table}:user_id:users:c`);
   if (constraints.rows.length !== expected.size) throw new Error("Unexpected foreign-key dependencies; deletion refused.");
   for (const row of constraints.rows) {
     const key = `${row.child}:${row.child_columns.join(",")}:${row.parent}:${row.confdeltype}`;
@@ -118,14 +119,14 @@ async function verifySchema(client: PoolClient, monetizationTables: Monetization
   }
 }
 
-async function countRecords(client: PoolClient, userId: string, monetizationTables: MonetizationTable[]): Promise<Counts> {
+async function countRecords(client: PoolClient, userId: string, supplementalTables: SupplementalTable[]): Promise<Counts> {
   const { rows } = await client.query(`SELECT
     (SELECT count(*)::int FROM public.users WHERE id=$1::uuid) AS users,
     (SELECT count(*)::int FROM public.resumes WHERE user_id=$1::uuid) AS resumes,
     (SELECT count(*)::int FROM public.applications WHERE user_id=$1::uuid) AS applications,
     (SELECT count(*)::int FROM public.sessions WHERE user_id=$1::uuid) AS sessions`, [userId]);
   const counts: Counts = rows[0];
-  for (const table of monetizationTables) {
+  for (const table of supplementalTables) {
     const result = await client.query(`SELECT count(*)::int AS count FROM public.${table} WHERE user_id=$1::uuid`, [userId]);
     counts[table] = result.rows[0].count;
   }
@@ -150,13 +151,13 @@ export async function processWebsiteAccount(client: PoolClient, options: Deletio
       ? "LOCK TABLE public.users, public.resumes, public.applications, public.sessions IN SHARE ROW EXCLUSIVE MODE"
       : "LOCK TABLE public.users, public.resumes, public.applications, public.sessions IN ACCESS SHARE MODE");
     await client.query("LOCK TABLE public.jobs IN ACCESS SHARE MODE");
-    const monetizationTables = await lockMonetizationTables(client, options.mode);
+    const supplementalTables = await lockSupplementalTables(client, options.mode);
     const identity = await client.query("SELECT current_database() AS name, current_setting('session_replication_role') AS replication_role");
     if (identity.rows[0].name !== options.databaseName || identity.rows[0].replication_role !== "origin") {
       throw new Error("Database identity or constraint enforcement mismatch; operation refused.");
     }
-    await verifySchema(client, monetizationTables);
-    const before = await countRecords(client, options.userId, monetizationTables);
+    await verifySchema(client, supplementalTables);
+    const before = await countRecords(client, options.userId, supplementalTables);
     if (options.mode === "dry-run") {
       await client.query("ROLLBACK");
       return { status: "dry-run" as const, counts: before };
@@ -168,7 +169,7 @@ export async function processWebsiteAccount(client: PoolClient, options: Deletio
     }
     const deleted = await client.query("DELETE FROM public.users WHERE id=$1::uuid", [options.userId]);
     if (deleted.rowCount !== 1) throw new Error("Unexpected deletion result.");
-    const after = await countRecords(client, options.userId, monetizationTables);
+    const after = await countRecords(client, options.userId, supplementalTables);
     if (Object.values(after).some(count => count !== 0)) throw new Error("Dependent records remain; deletion rolled back.");
     await client.query("COMMIT");
     return { status: "website-database-deleted" as const, counts: before };

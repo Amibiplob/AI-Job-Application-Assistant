@@ -30,7 +30,7 @@ Use verified TLS for a remote database through the operator connection settings.
 Use an operator database role with SELECT on the five reviewed public tables and
 DELETE on users, resumes, applications and sessions (needed for deletion locks).
 After the Phase 1 monetization migrations, also grant SELECT and DELETE on
-`subscription_entitlements` and `monthly_usage` for their counts and locks.
+`subscription_entitlements`, `monthly_usage`, and `external_identities` for their counts and locks.
 The tool does not provision credentials or grant permissions. Do not make this
 role available to customers or route handlers; no superuser is required.
 
@@ -43,7 +43,7 @@ node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON s
 Replace the uppercase placeholders with reviewed values. UUIDs must use exact
 canonical lowercase form. Dry-run checks the live schema and returns only counts
 for that user: users, resumes, applications and sessions. When present,
-`subscription_entitlements` and `monthly_usage` are also included in the counts
+`subscription_entitlements`, `monthly_usage`, and `external_identities` are also included in the counts
 and reviewed cascade graph. It uses a read-only transaction and rolls back.
 It never selects or prints email, resume text, notes,
 password hashes, or session IDs. Counts are a snapshot, not a promise that data

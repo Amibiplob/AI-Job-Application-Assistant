@@ -73,8 +73,9 @@ no response deadline or legal entitlement.
    inventing one or promising immediate complete erasure.
 4. **Resolve identities independently.** Obtain the exact canonical lowercase
    internal website UUID through the authorized administrative workflow. Verify
-   any Auth0 identity separately using its own approved process. Never link or
-   delete across systems just because emails match; no identity mapping exists.
+   any Auth0 identity separately using its own approved process. A local mapping
+   may contain only a verified issuer/subject pair; never create, infer, or delete
+   a cross-system identity merely because emails match.
 5. **Verify the database target and permission to proceed.** Independently check
    host/Neon branch, environment, database, schema and approved request. The
    CLI's database-name comparison is necessary but not proof of the correct

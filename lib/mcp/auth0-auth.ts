@@ -19,7 +19,18 @@ export type RemoteMcpAuthConfig = {
   audience: string;
   jwksUrl: URL;
   resource: URL;
+  interactiveClientIds: ReadonlySet<string>;
 };
+
+const verifiedIdentityBrand = Symbol("verified-external-identity");
+
+export type VerifiedExternalIdentity = {
+  issuer: string;
+  subject: string;
+  readonly [verifiedIdentityBrand]: true;
+};
+
+const verifiedAuthInfos = new WeakSet<AuthInfo>();
 
 function isHttpsUrl(value: string): URL | null {
   try {
@@ -51,11 +62,19 @@ export function getRemoteMcpAuthConfig(
   const audienceUrl = isHttpsUrl(audience);
   if (!issuerUrl || !audienceUrl || issuerUrl.pathname !== "/") return null;
 
+  const interactiveClientIds = new Set(
+    (env.AUTH0_INTERACTIVE_CLIENT_IDS ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => /^[A-Za-z0-9_-]{8,128}$/.test(value)),
+  );
+
   return {
     issuer,
     audience,
     jwksUrl: new URL(".well-known/jwks.json", issuerUrl),
     resource: audienceUrl,
+    interactiveClientIds,
   };
 }
 
@@ -98,15 +117,36 @@ export function createAuth0TokenVerifier(
 
         if (!clientId || typeof payload.exp !== "number") throw invalidToken();
 
-        return {
+        const subject = typeof payload.sub === "string" && payload.sub ? payload.sub : null;
+        const grantType = typeof payload.gty === "string" ? payload.gty : null;
+        // Only a separately configured interactive OAuth application may assert
+        // an end-user principal. Client-credentials subjects identify software,
+        // never a customer, even when their signed `sub` happens to be stable.
+        const isInteractiveUser = Boolean(
+          subject &&
+          config.interactiveClientIds.has(clientId) &&
+          grantType !== "client-credentials" &&
+          subject !== clientId &&
+          !subject.endsWith("@clients"),
+        );
+
+        const authInfo: AuthInfo = {
           token,
           clientId,
           scopes,
           expiresAt: payload.exp,
           resource: config.resource,
-          extra: typeof payload.sub === "string" && payload.sub
-            ? { rateLimitSubject: payload.sub } : undefined,
+          extra: subject
+            ? {
+                rateLimitSubject: subject,
+                ...(isInteractiveUser
+                  ? { externalIdentity: { issuer: config.issuer, subject } }
+                  : {}),
+              }
+            : undefined,
         };
+        verifiedAuthInfos.add(authInfo);
+        return authInfo;
       } catch {
         throw invalidToken();
       }
@@ -114,19 +154,40 @@ export function createAuth0TokenVerifier(
   };
 }
 
+/** Returns only an identity produced by this verified-token path. Callers must
+ * never construct this value from request JSON, email, headers, or account IDs. */
+export function externalIdentityFromAuth(auth: AuthInfo): VerifiedExternalIdentity | null {
+  if (!verifiedAuthInfos.has(auth)) return null;
+  const identity = auth.extra?.externalIdentity;
+  if (!identity || typeof identity !== "object") return null;
+  const issuer = Reflect.get(identity, "issuer");
+  const subject = Reflect.get(identity, "subject");
+  if (typeof issuer !== "string" || typeof subject !== "string") return null;
+  const verified = { issuer, subject } as VerifiedExternalIdentity;
+  Object.defineProperty(verified, verifiedIdentityBrand, { value: true });
+  return verified;
+}
+
+export function isVerifiedExternalIdentity(value: unknown): value is VerifiedExternalIdentity {
+  return Boolean(value && typeof value === "object" && Reflect.get(value, verifiedIdentityBrand) === true);
+}
+
 let cachedVerifier:
-  | { issuer: string; audience: string; verifier: OAuthTokenVerifier }
+  | { issuer: string; audience: string; interactiveClients: string; verifier: OAuthTokenVerifier }
   | undefined;
 
 export function getRemoteMcpBearerGate(config: RemoteMcpAuthConfig) {
+  const interactiveClients = [...config.interactiveClientIds].sort().join(",");
   if (
     !cachedVerifier ||
     cachedVerifier.issuer !== config.issuer ||
-    cachedVerifier.audience !== config.audience
+    cachedVerifier.audience !== config.audience ||
+    cachedVerifier.interactiveClients !== interactiveClients
   ) {
     cachedVerifier = {
       issuer: config.issuer,
       audience: config.audience,
+      interactiveClients,
       verifier: createAuth0TokenVerifier(config),
     };
   }

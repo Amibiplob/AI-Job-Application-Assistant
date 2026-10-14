@@ -146,7 +146,8 @@ records or determine their retention from its own code. Other MCP clients have
 their own handling too. Prefer short, anonymized excerpts and review the client's
 current policies and account/workspace controls before sharing information.
 
-Auth0 handles the connection's interactive authentication/authorization. The
+Auth0 handles MCP authentication/authorization. The current repository
+configuration does not prove that deployed tokens identify an individual. The
 MCP server receives a bearer access token and verifies its signature, issuer,
 single configured audience, expiry and required `jobs:read` permission. It uses
 verified client identity and, when supplied, the signed subject for admission.
@@ -154,11 +155,12 @@ Tokens and claims are present in request/authentication memory; there is no
 application token/profile table or token persistence in the reviewed handler.
 Auth0 records, OAuth grants and any client-held refresh tokens are separate.
 
-Website users/sessions and Auth0 identities are **not linked or synchronized**.
-Matching email addresses do not establish a link. Website deletion neither
-deletes Auth0 identities nor revokes MCP authorization. Issued JWT access tokens
-may remain usable until expiry because the server verifies them locally rather
-than checking a revocation list on each request.
+The database includes a dormant verified issuer/subject mapping prerequisite,
+but no public linking flow or MCP entitlement lookup is enabled. Matching email
+addresses never establish a link. Website deletion removes a local mapping but
+neither deletes Auth0 identities nor revokes MCP authorization. Issued JWT access
+tokens may remain usable until expiry because the server verifies them locally
+rather than checking a revocation list on each request.
 
 [INTERNAL REVIEW: verify Auth0 tenant identity fields, granted claims, connection
 settings, token lifetimes/revocation, log retention and client storage. Verify

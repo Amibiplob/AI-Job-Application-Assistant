@@ -12,6 +12,7 @@ import { requireBearerAuth } from "@modelcontextprotocol/server";
 import {
   createAuth0TokenVerifier,
   createProtectedResourceMetadata,
+  externalIdentityFromAuth,
   getRemoteMcpAuthConfig,
   MCP_METADATA_PATH,
 } from "../lib/mcp/auth0-auth.ts";
@@ -75,6 +76,35 @@ test("maps only verified Auth0 permissions to MCP scopes and returns SDK AuthInf
   assert.equal(auth.resource.href, AUDIENCE);
   assert.equal(typeof auth.expiresAt, "number");
   assert.ok(auth.expiresAt > Math.floor(Date.now() / 1000));
+  assert.equal(externalIdentityFromAuth(auth), null);
+});
+
+test("exposes a linkable issuer and subject only for configured interactive clients", async () => {
+  const interactiveConfig = getRemoteMcpAuthConfig({
+    AUTH0_ISSUER: ISSUER,
+    AUTH0_AUDIENCE: AUDIENCE,
+    AUTH0_INTERACTIVE_CLIENT_IDS: `other-client, ${CLIENT_ID}`,
+  });
+  const interactiveVerifier = createAuth0TokenVerifier(interactiveConfig, keySet);
+  const auth = await interactiveVerifier.verifyAccessToken(await token({ sub: "auth0|individual-customer" }));
+  assert.deepEqual(externalIdentityFromAuth(auth), { issuer: ISSUER, subject: "auth0|individual-customer" });
+
+  for (const claims of [
+    { sub: `${CLIENT_ID}@clients`, gty: "client-credentials" },
+    { sub: "auth0|individual-customer", gty: "client-credentials" },
+    { sub: CLIENT_ID },
+  ]) {
+    const machine = await interactiveVerifier.verifyAccessToken(await token(claims));
+    assert.equal(externalIdentityFromAuth(machine), null);
+  }
+
+  assert.equal(externalIdentityFromAuth({
+    token: "attacker supplied",
+    clientId: CLIENT_ID,
+    scopes: ["jobs:read"],
+    expiresAt: Math.floor(Date.now() / 1000) + 60,
+    extra: { externalIdentity: { issuer: ISSUER, subject: "auth0|victim" } },
+  }), null);
 });
 
 test("rejects an invalid signature", async () => {
