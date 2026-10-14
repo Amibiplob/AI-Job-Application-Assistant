@@ -29,6 +29,8 @@ connection strings in command arguments, documentation, shell history or logs.
 Use verified TLS for a remote database through the operator connection settings.
 Use an operator database role with SELECT on the five reviewed public tables and
 DELETE on users, resumes, applications and sessions (needed for deletion locks).
+After the Phase 1 monetization migrations, also grant SELECT and DELETE on
+`subscription_entitlements` and `monthly_usage` for their counts and locks.
 The tool does not provision credentials or grant permissions. Do not make this
 role available to customers or route handlers; no superuser is required.
 
@@ -40,8 +42,10 @@ node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON s
 
 Replace the uppercase placeholders with reviewed values. UUIDs must use exact
 canonical lowercase form. Dry-run checks the live schema and returns only counts
-for that user: users, resumes, applications and sessions. It uses a read-only
-transaction and rolls back. It never selects or prints email, resume text, notes,
+for that user: users, resumes, applications and sessions. When present,
+`subscription_entitlements` and `monthly_usage` are also included in the counts
+and reviewed cascade graph. It uses a read-only transaction and rolls back.
+It never selects or prints email, resume text, notes,
 password hashes, or session IDs. Counts are a snapshot, not a promise that data
 will remain unchanged before a later deletion. Review all counts, including older
 resume records and expired sessions.
@@ -67,7 +71,13 @@ with NO ACTION. Additional incoming/outgoing foreign keys, disabled constraint
 triggers, or changed constraints stop execution. Do not bypass a refusal:
 investigate schema changes and update the reviewed tooling/tests first.
 
-Deletion briefly blocks writes to the four personal-data tables while checking
+The approved optional monetization tables reference users with the same validated,
+immediate ON DELETE CASCADE constraints. They have reviewed primary keys
+(`user_id` and `user_id,metric,month_start`) and receive the same table-safety
+checks. The utility still supports the pre-monetization schema.
+
+Deletion briefly blocks writes to the personal-data tables, including the two
+optional monetization tables when present, while checking
 the schema and removing the account. Lock and statement timeouts bound waiting;
 schedule during low traffic and retry safely if busy. Shared jobs are only read
 and locked against incompatible schema changes. A single parameterized DELETE
@@ -78,7 +88,7 @@ deletion occurred.
 ## Results, failures and sessions
 
 - Success reports `website-database-deleted` and the pre-deletion counts.
-- Run dry-run afterward; the selected user and all three dependent categories
+- Run dry-run afterward; the selected user and every reported dependent category
   must be zero. Record minimal request reference, operator, time, database scope
   and outcome in the approved restricted request register; do not copy deleted
   data into audit logs. Set register retention separately through policy.
@@ -96,6 +106,11 @@ deletion occurred.
 
 ## Separate retained copies
 
+- **Billing deduplication:** The minimal `billing_events` provider/event-ID ledger
+  has no user foreign key and remains after website account deletion. It contains
+  no raw payload, email or tokens. Provider records and retention of the ledger
+  require separate handling before a future payment integration. See
+  [SaaS monetization Phase 1](saas-monetization-phase-1.md).
 - **Auth0/MCP:** Use a separately authorized Auth0 process for the exact verified
   Auth0 identity, grants, refresh tokens, sessions and relevant provider records.
   This utility neither accesses nor deletes them. The MCP validates signed JWTs
