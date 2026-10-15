@@ -4,7 +4,7 @@ import type { Pool, PoolClient } from "pg";
 import { createMonetizationStore } from "@/lib/monetization/store";
 import type { PaddleSandboxConfig } from "./config";
 import type { PaddleSandboxClient } from "./client";
-import { assertPlanItems, paddleId, projectSandboxSubscription, supportedEvent, type PaddleEvent } from "./protocol";
+import { assertPlanItems, paddleId, paymentIsRevoked, projectSandboxSubscription, supportedEvent, type PaddleEvent } from "./protocol";
 
 type Row = {
   user_id: string; intent_id: string; transaction_id: string | null; customer_id: string | null;
@@ -12,6 +12,8 @@ type Row = {
   subscription_status: string | null; provider_updated_at: Date | null;
   paid_start: Date | null; paid_through: Date | null; reconciled_at: Date | null;
   cancel_at_period_end: boolean;
+  verified_payment_id: string | null; payment_revoked: boolean;
+  reconcile_attempts: number;
 };
 const user = (id: string) => z.uuid().parse(id);
 
@@ -44,11 +46,21 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
     const subscription = await api.subscription(subscriptionId);
     const original = await api.transaction(row.transaction_id);
     assertPlanItems(original.items, config.priceId);
-    if (original.custom_data?.link_intent !== row.intent_id || original.subscription_id !== subscription.id ||
+    if (original.currency_code !== "USD" || original.custom_data?.link_intent !== row.intent_id || original.subscription_id !== subscription.id ||
         original.customer_id !== subscription.customer_id || original.status !== "completed" ||
         (row.customer_id && row.customer_id !== subscription.customer_id)) throw new Error("Checkout relationship mismatch.");
     await api.verifyPrice();
-    const projection = projectSandboxSubscription(subscription, await api.latestCompleted(subscription.id), config.priceId);
+    const completed = await api.latestCompleted(subscription.id);
+    const projection = projectSandboxSubscription(subscription, completed, config.priceId);
+    const revoked = completed ? paymentIsRevoked(completed, await api.adjustments(completed.id)) ||
+      (row.verified_payment_id === completed.id && row.payment_revoked) : false;
+    // Subscription updated_at does not order transactions or adjustments.
+    // Keep a refund sticky for that payment, and reject regressing payment reads.
+    if (row.paid_through && (!projection.paidThrough || Date.parse(projection.paidThrough) < row.paid_through.getTime() ||
+        !projection.paidStart || Date.parse(projection.paidStart) < row.paid_start!.getTime() ||
+        (row.verified_payment_id && row.verified_payment_id !== completed?.id && Date.parse(projection.paidThrough) <= row.paid_through.getTime()))) {
+      throw new Error("Stale or conflicting payment state.");
+    }
     if (row.provider_updated_at) {
       const previous = row.provider_updated_at.getTime(), incoming = Date.parse(projection.providerUpdatedAt);
       // Do not acknowledge a stale API replica as successfully reconciled.
@@ -61,9 +73,11 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
       customer_id=$2, subscription_id=$3, checkout_state='linked', subscription_status=$4,
       provider_updated_at=$5::timestamptz, paid_start=$6::timestamptz, paid_through=$7::timestamptz,
       cancel_at_period_end=$8, reconciled_at=clock_timestamp(),
-      last_event_at=GREATEST(last_event_at,$9::timestamptz)
+      last_event_at=GREATEST(last_event_at,$9::timestamptz),
+      verified_payment_id=$10, payment_revoked=$11, reconcile_attempts=0,
+      next_reconcile_at=clock_timestamp()+interval '15 minutes', last_reconcile_result='ok'
       WHERE user_id=$1::uuid`, [row.user_id, subscription.customer_id, subscription.id, projection.status,
-      projection.providerUpdatedAt, projection.paidStart, projection.paidThrough, projection.cancelAtPeriodEnd, eventAt ?? null]);
+      projection.providerUpdatedAt, projection.paidStart, projection.paidThrough, projection.cancelAtPeriodEnd, eventAt ?? null, completed?.id ?? null, revoked]);
     // Intentionally NO subscription_entitlements or monthly_usage writes.
   }
   return {
@@ -104,27 +118,35 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
       // Return no provider identifiers, API credentials, or inferred Pro grant.
       return row ? { checkoutState: row.checkout_state, subscriptionStatus: row.subscription_status,
         paidThrough: row.paid_through?.toISOString() ?? null, reconciledAt: row.reconciled_at?.toISOString() ?? null,
-        cancelAtPeriodEnd: row.cancel_at_period_end } : null;
+        cancelAtPeriodEnd: row.cancel_at_period_end,
+        paymentRevoked: row.payment_revoked,
+        // Shadow projection only. No entitlement writer exists in this phase.
+        sandboxAccessPreview: !row.payment_revoked && ["active", "past_due", "canceled"].includes(row.subscription_status ?? "") &&
+          row.paid_start !== null && row.paid_start.getTime() <= Date.now() && row.paid_through !== null && row.paid_through.getTime() > Date.now() ? "pro" : "free" } : null;
     },
     async processEvent(event: PaddleEvent) {
       if (!supportedEvent(event)) return { ignored: true };
       return createMonetizationStore(db).withBillingEvent("paddle_sandbox", event.event_id, async client => {
         const isSubscription = event.event_type.startsWith("subscription.");
-        const id = paddleId(isSubscription ? "sub" : "txn").parse(event.data.id);
+        const isAdjustment = event.event_type.startsWith("adjustment.");
+        const id = paddleId(isSubscription ? "sub" : isAdjustment ? "adj" : "txn").parse(event.data.id);
+        const adjustment = isAdjustment ? await api.adjustment(id) : null;
+        const transactionId = adjustment?.transaction_id ?? id;
         const intent = z.uuid().safeParse(event.data.custom_data?.link_intent);
         // Custom data is only a lookup hint, never proof of ownership. The
         // canonical original server-created transaction must bind all IDs.
         const found = await client.query<Row>(`SELECT * FROM public.paddle_sandbox_accounts
           WHERE ${isSubscription ? "subscription_id" : "transaction_id"}=$1 OR intent_id=$2::uuid OR subscription_id=$3`,
-        [id, intent.success ? intent.data : null, isSubscription ? id : event.data.subscription_id ?? null]);
+        [isSubscription ? id : transactionId, intent.success ? intent.data : null, isSubscription ? id : adjustment?.subscription_id ?? event.data.subscription_id ?? null]);
         if (found.rowCount === 0) return; // Unrelated sandbox catalog/customer.
         if (found.rowCount !== 1) throw new Error("Conflicting account mapping.");
         const userId = found.rows[0].user_id;
         await owner(client, userId);
         const row = (await client.query<Row>("SELECT * FROM public.paddle_sandbox_accounts WHERE user_id=$1::uuid FOR UPDATE", [userId])).rows[0];
         if (!row) throw new Error("Account unavailable.");
-        const transaction = !isSubscription ? await api.transaction(id) : null;
+        const transaction = !isSubscription ? await api.transaction(transactionId) : null;
         if (transaction && row.transaction_id !== transaction.id && row.subscription_id !== transaction.subscription_id) throw new Error("Unowned transaction.");
+        if (adjustment && transaction && (adjustment.customer_id !== transaction.customer_id || adjustment.subscription_id !== transaction.subscription_id)) throw new Error("Unowned adjustment.");
         const subId = isSubscription ? id : transaction?.subscription_id;
         if (!subId) return; // Initial failed/canceled checkout cannot grant anything.
         await reconcile(client, row, subId, event.occurred_at);
@@ -140,6 +162,43 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
         if (!original.subscription_id) return;
         await reconcile(client, row, original.subscription_id);
       });
+    },
+    async reconcileBatch(limit = 5) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new Error("Invalid batch limit.");
+      const candidates = await db.query<{ user_id: string }>(`SELECT user_id FROM public.paddle_sandbox_accounts
+        WHERE transaction_id IS NOT NULL AND reconcile_attempts<3 AND next_reconcile_at<=clock_timestamp()
+        ORDER BY next_reconcile_at,user_id LIMIT $1`, [limit]);
+      const counts = { selected: candidates.rowCount ?? 0, ok: 0, retry: 0, exhausted: 0, skipped: 0 };
+      for (const candidate of candidates.rows) {
+        const outcome = await locked(async client => {
+          // Same lock order as checkout/webhooks; don't wait for another worker.
+          const owner = await client.query("SELECT id FROM public.users WHERE id=$1::uuid FOR UPDATE SKIP LOCKED", [candidate.user_id]);
+          if (!owner.rowCount) return "skipped" as const;
+          const row = (await client.query<Row>(`SELECT * FROM public.paddle_sandbox_accounts WHERE user_id=$1::uuid
+            AND reconcile_attempts<3 AND next_reconcile_at<=clock_timestamp() FOR UPDATE`, [candidate.user_id])).rows[0];
+          if (!row?.transaction_id) return "skipped" as const;
+          await client.query("SAVEPOINT reconcile_account");
+          try {
+            const original = await api.transaction(row.transaction_id);
+            if (original.subscription_id) await reconcile(client, row, original.subscription_id);
+            else await client.query(`UPDATE public.paddle_sandbox_accounts SET reconcile_attempts=0,
+              next_reconcile_at=clock_timestamp()+interval '15 minutes',last_reconcile_result='ok' WHERE user_id=$1`, [row.user_id]);
+            await client.query("RELEASE SAVEPOINT reconcile_account");
+            return "ok" as const;
+          } catch {
+            await client.query("ROLLBACK TO SAVEPOINT reconcile_account");
+            const attempts = row.reconcile_attempts + 1;
+            const result = attempts === 3 ? "exhausted" as const : "retry" as const;
+            await client.query(`UPDATE public.paddle_sandbox_accounts SET reconcile_attempts=$2,last_reconcile_result=$3,
+              next_reconcile_at=clock_timestamp()+($4::int * interval '1 minute') WHERE user_id=$1`,
+            [row.user_id, attempts, result, attempts === 1 ? 1 : attempts === 2 ? 5 : 30]);
+            return result;
+          }
+        });
+        counts[outcome]++;
+      }
+      const blocked = await db.query<{ count: number }>(`SELECT count(*)::int AS count FROM public.paddle_sandbox_accounts WHERE reconcile_attempts=3`);
+      return { ...counts, blocked: blocked.rows[0].count }; // No user IDs, payloads or secrets.
     },
   };
 }

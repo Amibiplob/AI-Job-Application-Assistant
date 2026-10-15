@@ -3,14 +3,16 @@ import { createHmac } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 const require = createRequire(import.meta.url); require("tsx/cjs");
 const Module = require("node:module"); const original = Module._load;
 Module._load = function(id, ...args) { if (id === "server-only") return {}; return original.call(this, id, ...args); };
-let protocol, getConfig, clientFactory;
+let protocol, getConfig, clientFactory, getWorkerConfig;
 try {
   protocol = require("../lib/billing/paddle/protocol.ts");
   getConfig = require("../lib/billing/paddle/config.ts").getPaddleSandboxConfig;
   clientFactory = require("../lib/billing/paddle/client.ts").createPaddleSandboxClient;
+  getWorkerConfig = require("../lib/billing/paddle/worker-config.ts").getSandboxWorkerConfig;
 } finally { Module._load = original; }
 const pid = (prefix, char = "a") => `${prefix}_${char.repeat(26)}`;
 const env = { PADDLE_SANDBOX_ENABLED: "true", BILLING_DEPLOYMENT_ENV: "sandbox", PADDLE_SANDBOX_API_KEY: `pdl_sdbx_apikey_${"k".repeat(32)}`,
@@ -94,4 +96,56 @@ test("sandbox integration has no entitlement, quota, Auth0 or MCP activation pat
   assert.doesNotMatch(store, /(?:INSERT INTO|UPDATE|DELETE FROM)\s+(?:public\.)?(subscription_entitlements|monthly_usage)/i);
   const migration = await readFile(new URL("../migrations/008_paddle_sandbox_accounts.sql", import.meta.url), "utf8");
   assert.doesNotMatch(migration, /(?:INSERT INTO|UPDATE|DELETE FROM|ALTER TABLE)\s+(?:public\.)?(subscription_entitlements|monthly_usage)/i);
+});
+
+test("worker is disabled by default and refuses remote, production, ambiguous or non-sandbox databases", () => {
+  const base = { ...env, PADDLE_RECONCILIATION_ENABLED: "true", PADDLE_SANDBOX_DATABASE_URL: "postgresql:///paddle_sandbox_test?host=/tmp/paddle-isolated&user=synthetic_operator&port=6554" };
+  assert.equal(getWorkerConfig(base).database, "paddle_sandbox_test");
+  assert.equal(getWorkerConfig({ ...base, PADDLE_RECONCILIATION_ENABLED: "false" }), null);
+  assert.equal(getWorkerConfig({ ...base, VERCEL_ENV: "production" }), null);
+  for (const value of ["", "postgresql://prod.example/paddle_sandbox_test", "postgresql:///postgres?host=/tmp/test&user=test",
+    "postgresql:///paddle_sandbox_test?host=/var/run/postgresql&user=test", "postgresql:///paddle_sandbox_test?host=/tmp/test&user=test&options=x",
+    base.PADDLE_SANDBOX_DATABASE_URL + "&host=/tmp/other", base.PADDLE_SANDBOX_DATABASE_URL.replace("6554", "65536")])
+    assert.equal(getWorkerConfig({ ...base, PADDLE_SANDBOX_DATABASE_URL: value }), null, value);
+});
+
+test("disabled worker exits before connecting and emits only a redacted result", () => {
+  const result = spawnSync(process.execPath, ["--conditions=react-server", "--import", "tsx", "scripts/reconcile-paddle-sandbox.ts"], {
+    cwd: new URL("..", import.meta.url), encoding: "utf8", timeout: 10000,
+    env: { PATH: process.env.PATH, PADDLE_RECONCILIATION_ENABLED: "false", DATABASE_URL: "postgresql://sensitive.invalid/production" },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /disabled_or_failed/);
+  assert.doesNotMatch(result.stderr + result.stdout, /sensitive|production|postgresql:\/\//);
+});
+
+test("refund policy ignores pending/rejected refunds and credits; approved refunds/disputes revoke only the bound payment", () => {
+  const adjustment = { id: pid("adj"), transaction_id: payment.id, subscription_id: sub.id, customer_id: sub.customer_id, action: "refund", status: "approved" };
+  assert.equal(protocol.paymentIsRevoked(payment, [adjustment]), true);
+  for (const status of ["pending_approval", "rejected", "reversed"])
+    assert.equal(protocol.paymentIsRevoked(payment, [{ ...adjustment, status }]), false);
+  for (const action of ["credit", "credit_reverse", "chargeback_reverse", "chargeback_warning_reverse"])
+    assert.equal(protocol.paymentIsRevoked(payment, [{ ...adjustment, action }]), false);
+  for (const action of ["chargeback", "chargeback_warning"])
+    assert.equal(protocol.paymentIsRevoked(payment, [{ ...adjustment, action }]), true);
+  for (const change of [{ customer_id: pid("ctm", "b") }, { subscription_id: pid("sub", "b") }, { transaction_id: pid("txn", "b") }])
+    assert.throws(() => protocol.paymentIsRevoked(payment, [{ ...adjustment, ...change }]));
+});
+
+test("adjustment API uses bounded pagination, never follows returned URLs, and fails incomplete or foreign reads", async () => {
+  const adjustment = { id: pid("adj"), transaction_id: payment.id, subscription_id: sub.id, customer_id: sub.customer_id, action: "refund", status: "approved" };
+  const requests = [];
+  const client = clientFactory(config, async url => {
+    requests.push(url);
+    return Response.json({ data: requests.length === 1 ? [adjustment] : [], meta: { pagination: { has_more: requests.length === 1, next: "https://evil.test/steal" } } });
+  });
+  assert.deepEqual(await client.adjustments(payment.id), [adjustment]);
+  assert.equal(requests.length, 2); assert.match(requests[1], /&after=adj_/);
+  assert.ok(requests.every(url => url.startsWith("https://sandbox-api.paddle.com/adjustments?")));
+  for (const response of [{ data: [] }, { data: [], meta: { pagination: { has_more: true } } },
+    { data: [{ ...adjustment, transaction_id: pid("txn", "b") }], meta: { pagination: { has_more: false } } }])
+    await assert.rejects(clientFactory(config, async () => Response.json(response)).adjustments(payment.id));
+  let page = 0;
+  await assert.rejects(clientFactory(config, async () => Response.json({ data: [{ ...adjustment, id: pid("adj", String(++page)) }], meta: { pagination: { has_more: true } } })).adjustments(payment.id));
+  assert.equal(page, 5);
 });

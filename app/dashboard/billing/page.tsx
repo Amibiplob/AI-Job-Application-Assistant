@@ -22,6 +22,8 @@ export default async function BillingPage() {
     <p>Paddle integration is for sandbox testing only. Test payments do not activate Pro access.</p>
     {!config ? <p>Sandbox checkout is disabled.</p> : unavailable ? <p>Sandbox billing records are unavailable. Checkout cannot start.</p> : <>
       <p>Sandbox subscription: {status?.subscriptionStatus ?? "None verified"}.</p>
+      {status && <p>Sandbox access preview: {status.sandboxAccessPreview === "pro" ? "Pro" : "Free"}. Your actual website plan is unchanged.</p>}
+      {status?.paymentRevoked && <p>The verified sandbox payment was refunded or disputed. Its access preview is revoked pending operator review or a new paid period.</p>}
       {status?.paidThrough && <p>Last verified sandbox paid-through time: <time dateTime={status.paidThrough}>{status.paidThrough}</time>. This is a test record, not your website entitlement.</p>}
       {status?.cancelAtPeriodEnd && <p>The sandbox subscription is scheduled to cancel.</p>}
       {status?.reconciledAt && <p>Last checked: <time dateTime={status.reconciledAt}>{status.reconciledAt}</time>. Status may change; refresh from Paddle below.</p>}

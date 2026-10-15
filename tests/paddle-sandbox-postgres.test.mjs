@@ -6,15 +6,19 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { Pool } from "pg";
+import { createHmac } from "node:crypto";
 const bin = process.env.PADDLE_TEST_POSTGRES_BIN ?? "/usr/lib/postgresql/16/bin";
 const userA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", userB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const sessionA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc", sessionB = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const pid = (prefix, char = "a") => `${prefix}_${char.repeat(26)}`;
 const config = { priceId: pid("pri") };
 const now = Date.now(); const start = new Date(now - 86400000).toISOString(), end = new Date(now + 86400000).toISOString();
-let directory, server, pool, store, createStore, transactions, subscriptions, failCreate, creates, payments;
+let directory, server, pool, store, createStore, transactions, subscriptions, failCreate, creates, payments, adjustments, verifyWebhook, createMonetizationStore;
+const connectionClosures = [];
 const items = [{ quantity: 1, price: { id: config.priceId } }];
 const api = {
+  adjustments: async transactionId => [...adjustments.values()].filter(a => a.transaction_id === transactionId),
+  adjustment: async id => { if (!adjustments.has(id)) throw new Error("Unavailable"); return adjustments.get(id); },
   verifyPrice: async () => {},
   createCheckout: async intent => {
     creates++; if (failCreate) throw new Error("Uncertain provider outcome");
@@ -34,6 +38,7 @@ before(async () => {
   server = spawn(path.join(bin, "postgres"), ["-D", path.join(directory, "data"), "-k", directory, "-p", "6554", "-c", "listen_addresses=", "-c", "unix_socket_permissions=0700"], { stdio: "ignore" });
   server.on("error", () => {});
   pool = new Pool({ host: directory, port: 6554, user: "synthetic_operator", database: "postgres", connectionTimeoutMillis: 500 });
+  pool.on("connect", client => connectionClosures.push(new Promise(resolve => client.once("end", resolve))));
   let ready = false;
   for (let i = 0; i < 100; i++) { try { await pool.query("SELECT 1"); ready = true; break; } catch { await new Promise(resolve => setTimeout(resolve, 100)); } }
   assert.ok(ready);
@@ -41,10 +46,15 @@ before(async () => {
     await pool.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
   const require = createRequire(import.meta.url); require("tsx/cjs"); const Module = require("node:module"), original = Module._load;
   Module._load = function(id, ...args) { if (id === "server-only") return {}; return original.call(this, id, ...args); };
-  try { createStore = require("../lib/billing/paddle/store.ts").createPaddleSandboxStore; } finally { Module._load = original; }
+  try {
+    createStore = require("../lib/billing/paddle/store.ts").createPaddleSandboxStore;
+    verifyWebhook = require("../lib/billing/paddle/protocol.ts").verifyPaddleWebhook;
+    createMonetizationStore = require("../lib/monetization/store.ts").createMonetizationStore;
+  } finally { Module._load = original; }
 });
 after(async () => {
   await pool?.end();
+  await Promise.all(connectionClosures);
   if (server && server.exitCode === null) { const stopped = new Promise(resolve => server.once("exit", resolve)); server.kill("SIGINT"); await stopped; }
   if (directory) await rm(directory, { recursive: true, force: true });
 });
@@ -52,7 +62,7 @@ beforeEach(async () => {
   await pool.query("TRUNCATE public.users,public.billing_events CASCADE");
   await pool.query("INSERT INTO users(id,email) VALUES ($1,'a@example.test'),($2,'b@example.test')", [userA, userB]);
   await pool.query("INSERT INTO sessions(id,user_id,expires_at) VALUES ($1,$2,now()+interval '1 day'),($3,$4,now()+interval '1 day')", [sessionA, userA, sessionB, userB]);
-  transactions = new Map(); subscriptions = new Map(); payments = new Map(); failCreate = false; creates = 0;
+  transactions = new Map(); subscriptions = new Map(); payments = new Map(); adjustments = new Map(); failCreate = false; creates = 0;
   store = createStore(pool, config, api);
 });
 async function completed(userId = userA, sessionId = sessionA, char = "a") {
@@ -148,4 +158,161 @@ test("distinct concurrent events serialize canonical reads; expired sessions can
   assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 3);
   assert.equal((await store.status(userA)).subscriptionStatus, "active");
   assert.equal((await pool.query("SELECT * FROM subscription_entitlements")).rowCount, 0);
+});
+
+test("signed raw webhook verification gates database writes and replays deduplicate", async () => {
+  const { original, subscription } = await completed();
+  const raw = Buffer.from(JSON.stringify(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  const secret = "synthetic-webhook-secret-only";
+  const ts = Math.floor(Date.now() / 1000);
+  const sign = timestamp => `ts=${timestamp};h1=${createHmac("sha256", secret).update(`${timestamp}:`).update(raw).digest("hex")}`;
+  for (const header of [null, "forged", sign(ts - 60), sign(ts + 60)])
+    assert.throws(() => verifyWebhook(raw, header, secret));
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 0);
+  const verified = verifyWebhook(raw, sign(ts), secret);
+  await store.processEvent(verified);
+  assert.deepEqual(await store.processEvent(verified), { duplicate: true });
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 1);
+  assert.equal((await pool.query("SELECT * FROM subscription_entitlements")).rowCount, 0);
+});
+
+test("renewal payment watermark is independent of subscription version and cannot regress", async () => {
+  const { original, subscription } = await completed();
+  await store.reconcileUser(userA, sessionA);
+  const renewal = { ...original, id: pid("txn", "r"), billing_period: { starts_at: new Date(now - 3600000).toISOString(), ends_at: new Date(now + 30 * 86400000).toISOString() } };
+  transactions.set(renewal.id, renewal); payments.set(subscription.id, renewal);
+  await store.processEvent({ ...event("transaction.completed", "r", renewal.id), data: { id: renewal.id, subscription_id: subscription.id } });
+  assert.equal((await store.status(userA)).paidThrough, renewal.billing_period.ends_at);
+  payments.set(subscription.id, original);
+  await assert.rejects(store.processEvent(event("subscription.updated", "s", subscription.id)));
+  assert.equal((await pool.query("SELECT * FROM billing_events WHERE event_id=$1", [pid("evt", "s")])).rowCount, 0);
+  assert.equal((await store.status(userA)).paidThrough, renewal.billing_period.ends_at);
+});
+
+test("refund approval revokes preview, stale reads cannot restore it, new paid period can", async () => {
+  const { original, subscription } = await completed();
+  await store.reconcileUser(userA, sessionA);
+  const refund = { id: pid("adj"), transaction_id: original.id, subscription_id: subscription.id, customer_id: subscription.customer_id, action: "refund", status: "pending_approval" };
+  adjustments.set(refund.id, refund);
+  await store.processEvent(event("adjustment.created", "a", refund.id));
+  assert.equal((await store.status(userA)).sandboxAccessPreview, "pro");
+  refund.status = "approved";
+  await store.processEvent(event("adjustment.updated", "b", refund.id));
+  assert.equal((await store.status(userA)).sandboxAccessPreview, "free");
+  adjustments.clear(); // Simulate a stale replica or reversal: no automatic restoration.
+  await store.reconcileUser(userA, sessionA);
+  assert.equal((await store.status(userA)).paymentRevoked, true);
+  const renewal = { ...original, id: pid("txn", "r"), billing_period: { starts_at: new Date(now - 3600000).toISOString(), ends_at: new Date(now + 30 * 86400000).toISOString() } };
+  transactions.set(renewal.id, renewal); payments.set(subscription.id, renewal);
+  await store.reconcileUser(userA, sessionA);
+  assert.equal((await store.status(userA)).sandboxAccessPreview, "pro");
+  assert.equal((await store.status(userA)).paymentRevoked, false);
+  assert.equal((await pool.query("SELECT * FROM subscription_entitlements")).rowCount, 0);
+});
+
+test("refund relationship forgery cannot affect either account", async () => {
+  const a = await completed(), b = await completed(userB, sessionB, "b");
+  await store.reconcileUser(userA, sessionA); await store.reconcileUser(userB, sessionB);
+  const refund = { id: pid("adj"), transaction_id: a.original.id, subscription_id: b.subscription.id, customer_id: b.subscription.customer_id, action: "refund", status: "approved" };
+  adjustments.set(refund.id, refund);
+  await assert.rejects(store.processEvent(event("adjustment.created", "a", refund.id)));
+  assert.equal((await store.status(userA)).sandboxAccessPreview, "pro");
+  assert.equal((await store.status(userB)).sandboxAccessPreview, "pro");
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 0);
+});
+
+test("batch retries are bounded and isolated; successful manual reconciliation recovers exhaustion", async () => {
+  const a = await completed(), b = await completed(userB, sessionB, "b");
+  subscriptions.delete(a.subscription.id);
+  let result = await store.reconcileBatch();
+  assert.equal(result.retry, 1); assert.equal(result.ok, 1);
+  assert.equal((await store.status(userB)).subscriptionStatus, "active");
+  assert.equal((await store.reconcileBatch()).selected, 0); // Backoff is enforced.
+  for (let attempt = 2; attempt <= 3; attempt++) {
+    await pool.query("UPDATE paddle_sandbox_accounts SET next_reconcile_at=now()-interval '1 second' WHERE user_id=$1", [userA]);
+    result = await store.reconcileBatch(); assert.equal(result[attempt === 3 ? "exhausted" : "retry"], 1);
+  }
+  await pool.query("UPDATE paddle_sandbox_accounts SET next_reconcile_at=now()-interval '1 second'");
+  result = await store.reconcileBatch(); assert.equal(result.selected, 1); // Exhausted A isn't retried.
+  assert.equal(result.blocked, 1); // Remains visible even when excluded from work.
+  subscriptions.set(a.subscription.id, a.subscription);
+  await store.reconcileUser(userA, sessionA);
+  const row = (await pool.query("SELECT * FROM paddle_sandbox_accounts WHERE user_id=$1", [userA])).rows[0];
+  assert.equal(row.reconcile_attempts, 0); assert.equal(row.last_reconcile_result, "ok");
+  assert.equal((await store.status(userA)).sandboxAccessPreview, "pro");
+  assert.ok(b.original);
+  await assert.rejects(store.reconcileBatch(11));
+});
+
+test("concurrent batch workers do not reconcile the same account twice", async () => {
+  await completed();
+  const results = await Promise.all([store.reconcileBatch(), store.reconcileBatch()]);
+  assert.equal(results.reduce((sum, result) => sum + result.ok, 0), 1);
+  assert.equal((await store.status(userA)).subscriptionStatus, "active");
+});
+
+test("paid-through policy transitions expire without webhook; real entitlements stay disconnected", async () => {
+  const { original, subscription } = await completed();
+  await store.reconcileUser(userA, sessionA);
+  for (const [index, status] of ["past_due", "canceled"].entries()) {
+    subscription.status = status; subscription.updated_at = new Date(now + index).toISOString();
+    await store.reconcileUser(userA, sessionA);
+    assert.equal((await store.status(userA)).sandboxAccessPreview, "pro");
+  }
+  // Advance the persisted verified period into the past; no delivery required.
+  await pool.query("UPDATE paddle_sandbox_accounts SET paid_start=now()-interval '2 days',paid_through=now()-interval '1 second' WHERE user_id=$1", [userA]);
+  assert.equal((await store.status(userA)).sandboxAccessPreview, "free");
+  assert.equal((await pool.query("SELECT * FROM subscription_entitlements")).rowCount, 0);
+  assert.equal((await createMonetizationStore(pool).getEntitlement(userA)).plan, "free");
+  assert.ok(original);
+});
+
+test("isolated entitlement fixtures validate Free 3 / Pro 100 and downgrade without resetting usage", async () => {
+  const { subscription } = await completed(); await store.reconcileUser(userA, sessionA);
+  const meter = createMonetizationStore(pool);
+  assert.equal((await meter.consumeMonthlyUsage(userB, "job_analysis", 3)).allowed, true);
+  assert.equal((await meter.consumeMonthlyUsage(userB, "job_analysis")).allowed, false);
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  assert.equal((await store.status(userA)).sandboxAccessPreview, "pro");
+  // Test-only fixture, NOT an application activation path or Paddle e2e proof.
+  await pool.query(`INSERT INTO subscription_entitlements(user_id,plan,status,current_period_start,current_period_end)
+    SELECT user_id,'pro','active',paid_start,paid_through FROM paddle_sandbox_accounts WHERE user_id=$1`, [userA]);
+  assert.equal((await meter.consumeMonthlyUsage(userA, "job_analysis", 100)).allowed, true);
+  assert.equal((await meter.consumeMonthlyUsage(userA, "job_analysis")).allowed, false);
+  assert.equal((await meter.getMonthlyUsage(userA, "job_analysis")).limit, 100);
+  await pool.query("UPDATE subscription_entitlements SET status='expired' WHERE user_id=$1", [userA]);
+  const usage = await meter.getMonthlyUsage(userA, "job_analysis");
+  assert.equal(usage.plan, "free"); assert.equal(usage.limit, 3); assert.equal(usage.used, 100);
+  assert.equal((await meter.getMonthlyUsage(userB, "job_analysis")).used, 3);
+  assert.ok(subscription);
+});
+
+test("004-009 migrate an existing 001-003 database transactionally without backfills", async () => {
+  await pool.query("CREATE DATABASE paddle_sandbox_migration_test");
+  const isolated = new Pool({ host: directory, port: 6554, user: "synthetic_operator", database: "paddle_sandbox_migration_test" });
+  try {
+    const files = (await readdir(new URL("../migrations/", import.meta.url))).filter(f => f.endsWith(".sql")).sort();
+    for (const file of files.slice(0, 3)) await isolated.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+    await isolated.query("INSERT INTO users(id,email) VALUES ($1,'existing@example.test')", [userA]);
+    await isolated.query("INSERT INTO sessions(id,user_id,expires_at) VALUES ($1,$2,now()+interval '1 day')", [sessionA, userA]);
+    const users = (await isolated.query("SELECT * FROM users")).rows;
+    const sessions = (await isolated.query("SELECT * FROM sessions")).rows;
+    const connection = await isolated.connect();
+    try {
+      for (const file of files.slice(3)) {
+        await connection.query("BEGIN");
+        await connection.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+        await connection.query("COMMIT");
+      }
+    } finally { connection.release(); }
+    assert.deepEqual((await isolated.query("SELECT * FROM users")).rows, users);
+    assert.deepEqual((await isolated.query("SELECT * FROM sessions")).rows, sessions);
+    for (const table of ["subscription_entitlements", "monthly_usage", "billing_events", "external_identities", "account_link_transactions", "paddle_sandbox_accounts"])
+      assert.equal((await isolated.query(`SELECT * FROM ${table}`)).rowCount, 0);
+    assert.equal((await createMonetizationStore(isolated).getEntitlement(userA)).plan, "free");
+    await assert.rejects(isolated.query("INSERT INTO paddle_sandbox_accounts(user_id,reconcile_attempts) VALUES ($1,4)", [userA]));
+    await isolated.query("INSERT INTO paddle_sandbox_accounts(user_id) VALUES ($1)", [userA]);
+    await isolated.query("DELETE FROM users WHERE id=$1", [userA]);
+    assert.equal((await isolated.query("SELECT * FROM paddle_sandbox_accounts")).rowCount, 0);
+  } finally { await isolated.end(); await pool.query("DROP DATABASE paddle_sandbox_migration_test"); }
 });

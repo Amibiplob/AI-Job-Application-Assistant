@@ -1,12 +1,12 @@
 import "server-only";
 import { z } from "zod";
 import type { PaddleSandboxConfig } from "./config";
-import { assertPlanItems, paddleId, subscriptionSchema, transactionSchema } from "./protocol";
+import { adjustmentSchema, assertPlanItems, paddleId, subscriptionSchema, transactionSchema, type Adjustment } from "./protocol";
 
 // Raw Paddle Billing API adapter. No configurable host, live mode, redirects,
 // automatic POST retries, SDK logging, or production fallback exists.
 export function createPaddleSandboxClient(config: PaddleSandboxConfig, fetcher: typeof fetch = fetch) {
-  async function api(path: string, method = "GET", body?: unknown): Promise<unknown> {
+  async function envelope(path: string, method = "GET", body?: unknown): Promise<{ data?: unknown; meta?: unknown }> {
     try {
       const response = await fetcher(`https://sandbox-api.paddle.com${path}`, {
         method, headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json", "Paddle-Version": "1" },
@@ -14,11 +14,38 @@ export function createPaddleSandboxClient(config: PaddleSandboxConfig, fetcher: 
         cache: "no-store", redirect: "error", signal: AbortSignal.timeout(3000),
       });
       if (!response.ok) throw new Error();
-      const value = await response.json() as { data?: unknown };
-      return value.data;
+      return await response.json() as { data?: unknown; meta?: unknown };
     } catch { throw new Error("Sandbox billing service unavailable."); }
   }
+  async function api(path: string, method = "GET", body?: unknown) {
+    return (await envelope(path, method, body)).data;
+  }
   return {
+    async adjustment(id: string) {
+      paddleId("adj").parse(id);
+      const value = adjustmentSchema.parse(await api(`/adjustments/${id}`));
+      if (value.id !== id) throw new Error("Adjustment mismatch.");
+      return value;
+    },
+    async adjustments(transactionId: string): Promise<Adjustment[]> {
+      paddleId("txn").parse(transactionId);
+      const result: Adjustment[] = []; const seen = new Set<string>(); let after = "";
+      // Never follow a provider-supplied URL. Bound pagination; incomplete reads
+      // fail rather than treating missing refund evidence as approval.
+      for (let page = 0; page < 5; page++) {
+        const response = await envelope(`/adjustments?transaction_id=${transactionId}&per_page=50&order_by=id%5BASC%5D${after ? `&after=${after}` : ""}`);
+        const values = z.array(adjustmentSchema).max(50).parse(response.data);
+        const meta = z.object({ pagination: z.object({ has_more: z.boolean() }) }).parse(response.meta);
+        for (const value of values) {
+          if (value.transaction_id !== transactionId || seen.has(value.id)) throw new Error("Unexpected adjustment page.");
+          seen.add(value.id); result.push(value);
+        }
+        if (!meta.pagination.has_more) return result;
+        if (!values.length) throw new Error("Incomplete adjustment page.");
+        after = values[values.length - 1].id;
+      }
+      throw new Error("Adjustment pagination limit reached.");
+    },
     async verifyPrice() {
       const price = z.object({ id: paddleId("pri"), status: z.literal("active"), type: z.literal("standard"),
         unit_price: z.object({ amount: z.literal("1000"), currency_code: z.literal("USD") }),

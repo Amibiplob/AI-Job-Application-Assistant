@@ -7,7 +7,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { Pool } from "pg";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createAuth0TokenVerifier, externalIdentityFromAuth, getRemoteMcpAuthConfig } from "../lib/mcp/auth0-auth.ts";
+// Use the same TS module instance as the CJS-loaded store below. Mixing native
+// ESM stripping with tsx/CJS creates two independent verification WeakSets.
+const require = createRequire(import.meta.url);
+require("tsx/cjs");
+const { createAuth0TokenVerifier, externalIdentityFromAuth, getRemoteMcpAuthConfig } = require("../lib/mcp/auth0-auth.ts");
 
 const bin = process.env.IDENTITY_LINKING_TEST_POSTGRES_BIN ?? "/usr/lib/postgresql/16/bin";
 const userA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -17,6 +21,7 @@ const sessionB = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const issuer = "https://tenant.example.test/";
 const audience = "https://jobs.example.test/api/mcp";
 let directory, server, pool, store, transactionStore, identity, otherIdentity;
+const connectionClosures = [];
 
 before(async () => {
   const { privateKey, publicKey } = await generateKeyPair("RS256");
@@ -39,6 +44,7 @@ before(async () => {
   server = spawn(path.join(bin, "postgres"), ["-D", path.join(directory, "data"), "-k", directory, "-p", "6551", "-c", "listen_addresses=", "-c", "unix_socket_permissions=0700"], { stdio: "ignore" });
   server.on("error", () => {});
   pool = new Pool({ host: directory, port: 6551, user: "synthetic_operator", database: "postgres", connectionTimeoutMillis: 500 });
+  pool.on("connect", client => connectionClosures.push(new Promise(resolve => client.once("end", resolve))));
   let ready = false;
   for (let attempt = 0; attempt < 100; attempt++) {
     try { await pool.query("SELECT 1"); ready = true; break; }
@@ -48,8 +54,6 @@ before(async () => {
   for (const filename of ["001_initial_schema.sql", "002_auth_sessions.sql", "006_external_identities.sql", "007_account_link_transactions.sql"]) {
     await pool.query(await readFile(new URL(`../migrations/${filename}`, import.meta.url), "utf8"));
   }
-  const require = createRequire(import.meta.url);
-  require("tsx/cjs");
   const Module = require("node:module");
   const originalLoad = Module._load;
   Module._load = function(id, ...args) {
@@ -65,6 +69,7 @@ before(async () => {
 
 after(async () => {
   await pool?.end();
+  await Promise.all(connectionClosures);
   if (server && server.exitCode === null) {
     const stopped = new Promise(resolve => server.once("exit", resolve));
     server.kill("SIGINT");

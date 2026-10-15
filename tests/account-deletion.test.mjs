@@ -161,7 +161,7 @@ test("uncertain commit is reported as failure and a fresh dry-run establishes th
   } };
   try { await assert.rejects(processWebsiteAccount(wrapped, options("delete")), /outcome could not be confirmed/); }
   finally { client.release(true); }
-  assert.deepEqual((await run(options("dry-run"))).counts, { users: 0, resumes: 0, applications: 0, sessions: 0 });
+  assert.deepEqual((await run(options("dry-run"))).counts, { users: 0, resumes: 0, applications: 0, sessions: 0, external_identities: 0, account_link_transactions: 0, paddle_sandbox_accounts: 0 });
   assert.equal((await run(options("delete"))).status, "not-found");
 });
 

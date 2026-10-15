@@ -22,9 +22,15 @@ export const subscriptionSchema = z.object({
 });
 export type Subscription = z.infer<typeof subscriptionSchema>;
 export type Transaction = z.infer<typeof transactionSchema>;
+export const adjustmentSchema = z.object({
+  id: paddleId("adj"), transaction_id: paddleId("txn"), subscription_id: paddleId("sub").nullable(),
+  customer_id: paddleId("ctm"), action: z.enum(["refund", "credit", "chargeback", "chargeback_warning", "chargeback_reverse", "chargeback_warning_reverse", "credit_reverse"]),
+  status: z.enum(["pending_approval", "approved", "rejected", "reversed"]),
+});
+export type Adjustment = z.infer<typeof adjustmentSchema>;
 export const eventSchema = z.object({
   event_id: paddleId("evt"), event_type: z.string().min(1).max(100), occurred_at: date,
-  data: z.object({ id: z.string(), subscription_id: paddleId("sub").nullable().optional(),
+  data: z.object({ id: z.string(), subscription_id: paddleId("sub").nullable().optional(), transaction_id: paddleId("txn").optional(),
     custom_data: z.record(z.string(), z.unknown()).nullable().optional() }),
 });
 export type PaddleEvent = z.infer<typeof eventSchema>;
@@ -46,7 +52,17 @@ export function verifyPaddleWebhook(raw: Buffer, header: string | null, secret: 
 }
 
 export function supportedEvent(event: PaddleEvent): boolean {
-  return /^(subscription\.(created|activated|updated|canceled|past_due|paused|resumed|trialing)|transaction\.(completed|payment_failed|past_due|canceled|updated))$/.test(event.event_type);
+  return /^(subscription\.(created|activated|updated|canceled|past_due|paused|resumed|trialing)|transaction\.(completed|payment_failed|past_due|canceled|updated)|adjustment\.(created|updated))$/.test(event.event_type);
+}
+
+// Conservative sandbox policy: any approved refund (including partial),
+// chargeback or chargeback warning invalidates this payment's access preview.
+export function paymentIsRevoked(payment: Transaction, adjustments: Adjustment[]) {
+  for (const adjustment of adjustments) {
+    if (adjustment.transaction_id !== payment.id || adjustment.subscription_id !== payment.subscription_id ||
+        adjustment.customer_id !== payment.customer_id) throw new Error("Adjustment relationship mismatch.");
+  }
+  return adjustments.some(a => a.status === "approved" && ["refund", "chargeback", "chargeback_warning"].includes(a.action));
 }
 
 export function assertPlanItems(items: z.infer<typeof itemSchema>[], priceId: string) {
