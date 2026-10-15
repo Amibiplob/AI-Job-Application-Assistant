@@ -38,7 +38,7 @@ before(async () => {
     await admin.query(`CREATE DATABASE ${databaseName}`);
   } finally { await admin.end(); }
   pool = new Pool({ ...config, database: databaseName });
-  for (const filename of ["001_initial_schema.sql", "002_auth_sessions.sql", "006_external_identities.sql", "007_account_link_transactions.sql"]) {
+  for (const filename of ["001_initial_schema.sql", "002_auth_sessions.sql", "006_external_identities.sql", "007_account_link_transactions.sql", "008_paddle_sandbox_accounts.sql"]) {
     await pool.query(await readFile(new URL(`../migrations/${filename}`, import.meta.url), "utf8"));
   }
 });
@@ -62,6 +62,7 @@ beforeEach(async () => {
     await pool.query("INSERT INTO applications(user_id,job_id,notes,applied_at) VALUES ($1,$2,'Private synthetic notes',now())", [owner, jobId]);
   }
   await pool.query("INSERT INTO sessions(id,user_id,expires_at) VALUES ($1,$2,now()+interval '1 day'),(gen_random_uuid(),$2,now()-interval '1 day'),(gen_random_uuid(),$3,now()+interval '1 day')", [sessionId, userId, otherId]);
+  await pool.query("INSERT INTO paddle_sandbox_accounts(user_id) VALUES ($1),($2)", [userId, otherId]);
   await pool.query("INSERT INTO external_identities(user_id,issuer,subject) VALUES ($1,'https://tenant.example.test/','auth0|a'),($2,'https://tenant.example.test/','auth0|b')", [userId, otherId]);
   await pool.query("INSERT INTO account_link_transactions(state_hash,user_id,session_id,code_verifier,nonce,expires_at) VALUES (decode(repeat('aa',32),'hex'),$1,$2,repeat('a',43),repeat('b',32),now()+interval '5 minutes'),(decode(repeat('bb',32),'hex'),$3,(SELECT id FROM sessions WHERE user_id=$3 LIMIT 1),repeat('c',43),repeat('d',32),now()+interval '5 minutes')", [userId, sessionId, otherId]);
 });
@@ -74,8 +75,8 @@ async function run(input) {
 
 async function snapshot() {
   const rows = {};
-  for (const table of ["users", "resumes", "applications", "sessions", "jobs", "external_identities", "account_link_transactions"]) {
-    rows[table] = (await pool.query(`SELECT * FROM public.${table} ORDER BY ${table === "account_link_transactions" ? "state_hash" : "id"}`)).rows;
+  for (const table of ["users", "resumes", "applications", "sessions", "jobs", "external_identities", "account_link_transactions", "paddle_sandbox_accounts"]) {
+    rows[table] = (await pool.query(`SELECT * FROM public.${table} ORDER BY ${table === "account_link_transactions" ? "state_hash" : table === "paddle_sandbox_accounts" ? "user_id" : "id"}`)).rows;
   }
   return rows;
 }
@@ -99,7 +100,7 @@ test("strict arguments reject invalid UUIDs, missing/mismatched confirmation and
 test("dry-run reports only counts and does not mutate any records", async () => {
   const before = await snapshot();
   const result = await run(options("dry-run"));
-  assert.deepEqual(result, { status: "dry-run", counts: { users: 1, resumes: 2, applications: 1, sessions: 2, external_identities: 1, account_link_transactions: 1 } });
+  assert.deepEqual(result, { status: "dry-run", counts: { users: 1, resumes: 2, applications: 1, sessions: 2, external_identities: 1, account_link_transactions: 1, paddle_sandbox_accounts: 1 } });
   assert.doesNotMatch(JSON.stringify(result), /Private|synthetic-hash|cccccccc/);
   assert.deepEqual(await snapshot(), before);
 });
@@ -108,11 +109,11 @@ test("deletion removes every owned row, preserves other users and jobs, and safe
   const before = await snapshot();
   assert.equal((await run(options("delete"))).status, "website-database-deleted");
   const after = await snapshot();
-  for (const table of ["users", "resumes", "applications", "sessions", "external_identities", "account_link_transactions"]) {
+  for (const table of ["users", "resumes", "applications", "sessions", "external_identities", "account_link_transactions", "paddle_sandbox_accounts"]) {
     assert.deepEqual(after[table], before[table].filter(row => table === "users" ? row.id !== userId : row.user_id !== userId));
   }
   assert.deepEqual(after.jobs, before.jobs);
-  assert.deepEqual(await run(options("delete")), { status: "not-found", counts: { users: 0, resumes: 0, applications: 0, sessions: 0, external_identities: 0, account_link_transactions: 0 } });
+  assert.deepEqual(await run(options("delete")), { status: "not-found", counts: { users: 0, resumes: 0, applications: 0, sessions: 0, external_identities: 0, account_link_transactions: 0, paddle_sandbox_accounts: 0 } });
   assert.deepEqual(await snapshot(), after);
 });
 
@@ -198,7 +199,7 @@ test("row security and custom deletion triggers prevent operation", async () => 
 
 test("operator role works without superuser and disabled FK triggers are rejected", async () => {
   await pool.query("CREATE ROLE synthetic_deletion_operator");
-  await pool.query("GRANT USAGE ON SCHEMA public TO synthetic_deletion_operator; GRANT SELECT ON public.users,public.resumes,public.applications,public.sessions,public.jobs,public.external_identities,public.account_link_transactions TO synthetic_deletion_operator; GRANT DELETE ON public.users,public.resumes,public.applications,public.sessions,public.external_identities,public.account_link_transactions TO synthetic_deletion_operator");
+  await pool.query("GRANT USAGE ON SCHEMA public TO synthetic_deletion_operator; GRANT SELECT ON public.users,public.resumes,public.applications,public.sessions,public.jobs,public.external_identities,public.account_link_transactions,public.paddle_sandbox_accounts TO synthetic_deletion_operator; GRANT DELETE ON public.users,public.resumes,public.applications,public.sessions,public.external_identities,public.account_link_transactions,public.paddle_sandbox_accounts TO synthetic_deletion_operator");
   const client = await pool.connect();
   try {
     await client.query("SET ROLE synthetic_deletion_operator");

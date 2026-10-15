@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Usage } from "@/lib/monetization/store";
 
 export function MonthlyMatchUsage({ usage }: { usage: Usage | null }) {
@@ -13,6 +14,7 @@ export function MonthlyMatchUsage({ usage }: { usage: Usage | null }) {
         {usage.remaining === 0 && <p className="mt-2 text-sm text-text-secondary">Your monthly allowance is used up. You can match again when it resets.</p>}
         <p className="mt-3 text-xs leading-5 text-text-secondary">Saved-job comparisons and pasted-description analyses share this allowance. Completed comparisons count, including zero overlap and unscored results. Invalid or failed comparisons do not.</p>
       </> : <p className="mt-3 text-sm text-text-secondary">Usage is unavailable right now. Refresh the page to check your remaining allowance.</p>}
+      <Link href="/dashboard/billing" className="mt-3 inline-block text-sm text-brand underline">Billing status and plans</Link>
     </section>
   );
 }
