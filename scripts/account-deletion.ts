@@ -2,8 +2,8 @@ import type { PoolClient } from "pg";
 
 // Operator tooling only: never import this module from app/, lib/, or MCP tools.
 export type DeletionOptions = { userId: string; databaseName: string; mode: "dry-run" | "delete"; confirmation?: string };
-type Counts = { users: number; resumes: number; applications: number; sessions: number; subscription_entitlements?: number; monthly_usage?: number; external_identities?: number };
-type SupplementalTable = "subscription_entitlements" | "monthly_usage" | "external_identities";
+type Counts = { users: number; resumes: number; applications: number; sessions: number; subscription_entitlements?: number; monthly_usage?: number; external_identities?: number; account_link_transactions?: number };
+type SupplementalTable = "subscription_entitlements" | "monthly_usage" | "external_identities" | "account_link_transactions";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export function parseDeletionArguments(args: string[]): DeletionOptions {
@@ -40,7 +40,7 @@ export function parseDeletionArguments(args: string[]): DeletionOptions {
 async function lockSupplementalTables(client: PoolClient, mode: DeletionOptions["mode"]): Promise<SupplementalTable[]> {
   const result = await client.query(`SELECT c.relname FROM pg_catalog.pg_class c
     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='public' AND c.relname IN ('subscription_entitlements','monthly_usage','external_identities')`);
+    WHERE n.nspname='public' AND c.relname IN ('subscription_entitlements','monthly_usage','external_identities','account_link_transactions')`);
   const tables: SupplementalTable[] = result.rows.map(row => row.relname);
   // Names originate only from the fixed catalog allowlist above.
   for (const table of tables) {
@@ -83,7 +83,7 @@ async function verifySchema(client: PoolClient, supplementalTables: Supplemental
       WHERE p.conrelid=c.oid AND p.contype='p' AND NOT p.condeferrable AND p.convalidated ORDER BY k.ord) AS primary_columns
     FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
     WHERE n.nspname='public' AND c.relname=ANY($1::text[])`, [supplementalTables]);
-  const expectedPrimaryKey = { subscription_entitlements: "user_id", monthly_usage: "user_id,metric,month_start", external_identities: "id" };
+  const expectedPrimaryKey = { subscription_entitlements: "user_id", monthly_usage: "user_id,metric,month_start", external_identities: "id", account_link_transactions: "state_hash" };
   if (monetization.rows.length !== supplementalTables.length || monetization.rows.some(row =>
     row.relkind !== "r" || row.relrowsecurity || row.relforcerowsecurity || row.inherited ||
     row.unsafe_triggers || row.rules || !row.uuid_owner || row.primary_columns.join(",") !==
@@ -103,8 +103,8 @@ async function verifySchema(client: PoolClient, supplementalTables: Supplemental
     JOIN pg_catalog.pg_class c ON c.oid=f.conrelid JOIN pg_catalog.pg_namespace ns ON ns.oid=c.relnamespace
     JOIN pg_catalog.pg_class r ON r.oid=f.confrelid JOIN pg_catalog.pg_namespace nr ON nr.oid=r.relnamespace
     WHERE f.contype='f' AND (
-      (ns.nspname='public' AND c.relname IN ('users','resumes','applications','sessions','jobs','subscription_entitlements','monthly_usage','external_identities')) OR
-      (nr.nspname='public' AND r.relname IN ('users','resumes','applications','sessions','jobs','subscription_entitlements','monthly_usage','external_identities')))
+      (ns.nspname='public' AND c.relname IN ('users','resumes','applications','sessions','jobs','subscription_entitlements','monthly_usage','external_identities','account_link_transactions')) OR
+      (nr.nspname='public' AND r.relname IN ('users','resumes','applications','sessions','jobs','subscription_entitlements','monthly_usage','external_identities','account_link_transactions')))
   `);
   const expected = new Set(["resumes:user_id:users:c", "applications:user_id:users:c", "sessions:user_id:users:c", "applications:job_id:jobs:a"]);
   for (const table of supplementalTables) expected.add(`${table}:user_id:users:c`);

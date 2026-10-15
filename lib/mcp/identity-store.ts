@@ -49,15 +49,37 @@ async function transaction<T>(db: Pick<Pool, "connect">, operation: (client: Poo
 
 export function createExternalIdentityStore(db: Pick<Pool, "query" | "connect">) {
   return {
+    async status(websiteUserId: string): Promise<{ linked: boolean }> {
+      validateWebsiteUserId(websiteUserId);
+      try {
+        const result = await db.query(
+          "SELECT 1 FROM public.external_identities WHERE user_id=$1::uuid LIMIT 1",
+          [websiteUserId],
+        );
+        return { linked: result.rowCount === 1 };
+      } catch {
+        throw new Error("External identity lookup failed.");
+      }
+    },
+
     /** `websiteUserId` must come from the authenticated website session and
      * `identity` from signature/issuer/audience-verified interactive OAuth.
      * Neither value may be accepted from a request body. */
-    async link(websiteUserId: string, identity: VerifiedExternalIdentity) {
+    async link(websiteUserId: string, identity: VerifiedExternalIdentity, sessionId?: string) {
       validateWebsiteUserId(websiteUserId);
       validateIdentity(identity);
+      if (sessionId !== undefined && !UUID.test(sessionId)) throw new Error("Authenticated website session required.");
       return transaction(db, async (client) => {
         const owner = await client.query("SELECT id FROM public.users WHERE id=$1::uuid FOR UPDATE", [websiteUserId]);
         if (owner.rowCount !== 1) throw new Error("Account unavailable.");
+        // Lock through commit so logout cannot revoke the session between this
+        // final check and the identity write following a slow OAuth exchange.
+        if (sessionId !== undefined) {
+          const session = await client.query(`SELECT id FROM public.sessions
+            WHERE id=$1::uuid AND user_id=$2::uuid AND expires_at>clock_timestamp()
+            FOR UPDATE`, [sessionId, websiteUserId]);
+          if (session.rowCount !== 1) throw new Error("Session unavailable.");
+        }
         const inserted = await client.query<{ user_id: string }>(`INSERT INTO public.external_identities(user_id,issuer,subject)
           VALUES ($1::uuid,$2,$3)
           ON CONFLICT (issuer,subject) DO UPDATE SET subject=EXCLUDED.subject

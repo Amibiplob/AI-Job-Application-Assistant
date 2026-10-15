@@ -9,6 +9,9 @@ import { InlineFeedback } from "@/components/presentation/inline-feedback";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getAccountLinkConfig } from "@/lib/account-link/config";
+import { createExternalIdentityStore } from "@/lib/mcp/identity-store";
+import { pool } from "@/lib/db/pool";
 
 export const metadata: Metadata = {
   title: "Connect to ChatGPT | AI Job Application Assistant",
@@ -33,8 +36,15 @@ const troubleshooting = [
   { title: "No jobs, missing details, or an unexpected score", text: "Try another title or company keyword and remove the workplace filter. Use a job ID returned by search. A missing record can return no job. Matching scores count only recognized dictionary skills; descriptions without recognized skills return no score." },
 ];
 
-export default async function ConnectPage() {
+export default async function ConnectPage({ searchParams }: { searchParams: Promise<{ link?: string }> }) {
   const currentUser = await getCurrentUser();
+  const linkConfig = getAccountLinkConfig();
+  let linkStatus: "linked" | "unlinked" | "unavailable" = "unavailable";
+  if (currentUser) {
+    try { linkStatus = (await createExternalIdentityStore(pool).status(currentUser.id)).linked ? "linked" : "unlinked"; }
+    catch { linkStatus = "unavailable"; }
+  }
+  const linkResult = (await searchParams).link;
   return (
     <div className="min-h-screen bg-canvas text-text-primary">
       <a href="#connect-content" className="sr-only z-50 rounded-lg bg-surface p-3 text-sm focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus-visible:outline-2 focus-visible:outline-focus">Skip to connection guide</a>
@@ -52,6 +62,14 @@ export default async function ConnectPage() {
         </nav>
       </header>
       <main id="connect-content" tabIndex={-1} className="mx-auto w-full max-w-7xl space-y-12 px-4 py-12 outline-none sm:px-8 sm:py-16 lg:px-12">
+        {currentUser && <section aria-labelledby="account-link-heading" className="rounded-2xl border border-border bg-surface p-6 sm:p-8">
+          <h2 id="account-link-heading" className="text-xl font-semibold">Website and MCP account link</h2>
+          {linkResult === "success" && <InlineFeedback title="Account linked">Your verified Auth0 identity is now linked to this website account.</InlineFeedback>}
+          {linkResult === "failed" && <InlineFeedback tone="error" title="Link not completed">The secure verification could not be completed. No account link was changed.</InlineFeedback>}
+          <p className="mt-3 text-sm leading-6 text-text-secondary">Status: {linkStatus === "linked" ? "Linked" : linkStatus === "unlinked" ? "Not linked" : "Unavailable until the required migrations and interactive Auth0 configuration are ready"}.</p>
+          {linkStatus === "unlinked" && linkConfig && <form method="post" action="/api/account-link/start" className="mt-4"><button type="submit" className={cn(buttonVariants(), "min-h-11 px-5")}>Verify and link Auth0 account</button></form>}
+          {!linkConfig && <p className="mt-3 text-xs leading-6 text-text-secondary">Account linking is disabled because the dedicated interactive OAuth configuration has not been verified.</p>}
+        </section>}
         <section aria-labelledby="connect-heading" className="grid items-start gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <div className="min-w-0 space-y-6">
             <PageHeader title="Connect to ChatGPT" titleId="connect-heading" eyebrow="Your job search, in conversation" description="Search available jobs and compare your experience from a ChatGPT conversation, using the same tools that power your website workspace." />

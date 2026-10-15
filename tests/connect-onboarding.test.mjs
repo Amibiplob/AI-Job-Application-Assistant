@@ -10,6 +10,9 @@ const originalLoad = Module._load;
 let signedIn = false;
 const privateUser = { id: "private-user-id", email: "private@example.test", name: "Private Name" };
 Module._load = function(id, ...args) {
+  if (id === "@/lib/account-link/config") return { getAccountLinkConfig: () => null };
+  if (id === "@/lib/mcp/identity-store") return { createExternalIdentityStore: () => ({ status: async () => ({ linked: false }) }) };
+  if (id === "@/lib/db/pool") return { pool: {} };
   if (id === "@/lib/auth") return { getCurrentUser: async () => signedIn ? privateUser : null };
   return originalLoad.call(this, id, ...args);
 };
@@ -24,7 +27,7 @@ const render = async component => renderToStaticMarkup(await component());
 test("public onboarding renders for signed-out and signed-in visitors without exposing identity", async () => {
   for (const authenticated of [false, true, false]) {
     signedIn = authenticated;
-    const html = await render(Connect);
+    const html = await render(() => Connect({ searchParams: Promise.resolve({}) }));
     assert.match(html, /<h1[^>]*>Connect to ChatGPT<\/h1>/);
     assert.match(html, /<a(?=[^>]*href="\/connect")(?=[^>]*aria-current="page")[^>]*>/);
     assert.match(html, /href="\/dashboard"/);
@@ -64,7 +67,7 @@ test("copyable examples conform to deployed tool inputs and use a returned job I
 
 test("onboarding explains demo data, separate identities, text sharing, availability and manual copying", async () => {
   signedIn = false;
-  const html = await render(Connect);
+  const html = await render(() => Connect({ searchParams: Promise.resolve({}) }));
   const text = html.replace(/<[^>]*>/g, " ");
   for (const phrase of [/demonstration listings/, /not a hiring probability/, /does not currently retrieve website-saved resumes/, /ChatGPT sends the supplied resume/, /does not save it to the website database/, /infrastructure logs/, /Auth0/, /Website login is separate/, /plans or workspaces may not allow/, /Never paste passwords/]) assert.match(text, phrase);
   assert.ok(html.includes(MCP_SERVER_URL));
