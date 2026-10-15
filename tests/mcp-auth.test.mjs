@@ -215,3 +215,42 @@ test("keeps the existing stdio entry point on its current tool registration", as
   assert.match(source, /serveStdio/);
   assert.match(source, /registerJobTools\(server, \{ getJobById, listJobs \}\)/);
 });
+
+test("reviewed client claim compatibility accepts either documented profile and rejects ambiguous claims", async () => {
+  for (const claims of [
+    { azp: CLIENT_ID },
+    { azp: undefined, client_id: CLIENT_ID },
+    { azp: CLIENT_ID, client_id: CLIENT_ID },
+  ]) assert.equal((await verifier().verifyAccessToken(await token(claims))).clientId, CLIENT_ID);
+  for (const claims of [
+    { azp: CLIENT_ID, client_id: "different-client" },
+    { azp: null, client_id: CLIENT_ID },
+    { azp: CLIENT_ID, client_id: 123 },
+    { azp: "", client_id: CLIENT_ID },
+    { azp: undefined, client_id: "" },
+  ]) await assert.rejects(verifier().verifyAccessToken(await token(claims)), { code: "invalid_token" });
+});
+
+test("non-user and unreviewed delegated profiles never yield a website identity", async () => {
+  const interactiveConfig = { ...config, interactiveClientIds: new Set([CLIENT_ID]) };
+  const interactiveVerifier = createAuth0TokenVerifier(interactiveConfig, keySet);
+  for (const claims of [
+    { sub_profile: "service" },
+    { sub_profile: "ai_agent" },
+    { sub_profile: "browser_app" },
+    { sub_profile: "native_app" },
+    { sub_profile: null },
+    { sub_profile: ["user"] },
+    { act: { sub: "agent" } },
+    { act: null },
+    { gty: ["client-credentials"] },
+    { gty: "password" },
+  ]) {
+    // RFC 9068 can omit gty; modern non-user subjects need not end @clients.
+    const auth = await interactiveVerifier.verifyAccessToken(await token({ azp: undefined, client_id: CLIENT_ID, sub: "principal-without-clients-suffix", ...claims }));
+    assert.equal(externalIdentityFromAuth(auth), null);
+    assert.deepEqual(auth.scopes, ["jobs:read"]);
+  }
+  const human = await interactiveVerifier.verifyAccessToken(await token({ sub: "auth0|user", sub_profile: "user" }));
+  assert.deepEqual(externalIdentityFromAuth(human), { issuer: ISSUER, subject: "auth0|user" });
+});

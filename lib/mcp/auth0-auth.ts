@@ -108,24 +108,33 @@ export function createAuth0TokenVerifier(
                 typeof permission === "string" && permission === MCP_REQUIRED_SCOPE,
             )
           : [];
-        const clientId =
-          typeof payload.azp === "string"
-            ? payload.azp
-            : typeof payload.client_id === "string"
-              ? payload.client_id
-              : null;
+        // Auth0's profile uses azp; RFC 9068 uses client_id. Never silently
+        // prefer one signed claim over a contradictory or malformed other one.
+        const azp = payload.azp;
+        const clientClaim = payload.client_id;
+        if (
+          (azp !== undefined && (typeof azp !== "string" || !azp.trim())) ||
+          (clientClaim !== undefined && (typeof clientClaim !== "string" || !clientClaim.trim())) ||
+          (azp !== undefined && clientClaim !== undefined && azp !== clientClaim)
+        ) throw invalidToken();
+        const clientId = typeof azp === "string" ? azp : typeof clientClaim === "string" ? clientClaim : null;
 
         if (!clientId || typeof payload.exp !== "number") throw invalidToken();
 
         const subject = typeof payload.sub === "string" && payload.sub ? payload.sub : null;
-        const grantType = typeof payload.gty === "string" ? payload.gty : null;
+        // Code tokens normally omit gty. A reviewed refresh-token user grant
+        // may preserve an individual identity. Other grants cannot establish it.
+        const individualGrant = payload.gty === undefined || payload.gty === "refresh_token";
+        const individualProfile = payload.sub_profile === undefined || payload.sub_profile === "user";
         // Only a separately configured interactive OAuth application may assert
         // an end-user principal. Client-credentials subjects identify software,
         // never a customer, even when their signed `sub` happens to be stable.
         const isInteractiveUser = Boolean(
           subject &&
           config.interactiveClientIds.has(clientId) &&
-          grantType !== "client-credentials" &&
+          individualGrant &&
+          individualProfile &&
+          payload.act === undefined &&
           subject !== clientId &&
           !subject.endsWith("@clients"),
         );

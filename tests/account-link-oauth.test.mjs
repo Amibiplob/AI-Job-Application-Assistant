@@ -107,6 +107,11 @@ test("rejects bad token endpoint, scope, machine grants, nonce, subject, at_hash
     response(await tokens({ idClaims: { nonce: "wrong" } })),
     response(await tokens({ idClaims: { azp: "wrong-client" } })),
     response(await tokens({ accessClaims: { azp: "wrong-client" } })),
+    response(await tokens({ accessClaims: { client_id: "different-client" } })),
+    response(await tokens({ accessClaims: { sub_profile: "service" } })),
+    response(await tokens({ accessClaims: { sub_profile: "ai_agent" } })),
+    response(await tokens({ accessClaims: { act: { sub: "agent" } } })),
+    response(await tokens({ idClaims: { at_hash: undefined } })),
     response(await tokens({ subject: "machine@clients" })),
     response(await tokens({ idSubject: "auth0|other" })),
     response(await tokens({ idClaims: { at_hash: "wrong" } })),
@@ -129,4 +134,10 @@ test("same-origin POST validation rejects CSRF and cross-site fetches", () => {
   assert.equal(oauth.isSameOriginPost(new Request("https://app.example.test/api/account-link/start", { method: "POST", headers: { origin: "https://app.example.test", "sec-fetch-site": "same-origin" } }), config.appOrigin), true);
   assert.equal(oauth.isSameOriginPost(new Request("https://app.example.test/api/account-link/start", { method: "POST" }), config.appOrigin), false);
   assert.equal(oauth.isSameOriginPost(new Request("https://app.example.test/api/account-link/start", { method: "POST", headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" } }), config.appOrigin), false);
+});
+
+ test("RFC 9068 client_id compatibility still requires the exact authorized interactive client", async () => {
+  const issued = await tokens({ accessClaims: { azp: undefined, client_id: clientId } });
+  const identity = await oauth.exchangeAndVerifyAccountLink(config, "code", "v".repeat(64), "n".repeat(43), { keySet, fetch: response(issued) });
+  assert.deepEqual(identity, { issuer, subject: "auth0|customer" });
 });

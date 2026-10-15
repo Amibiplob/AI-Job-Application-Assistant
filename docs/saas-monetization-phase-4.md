@@ -144,8 +144,10 @@ all creation/consumption/final linking checks independently validate sessions.
 
 The application role needs SELECT/INSERT/DELETE on link transactions,
 SELECT/INSERT/UPDATE/DELETE on external identities (idempotent linking uses an
-ON CONFLICT UPDATE), sequence access required by migration 006, and existing
-user/session SELECT plus row-lock permissions. Use least privilege; do not grant
+ON CONFLICT UPDATE), existing
+user/session SELECT plus row-lock permissions (which require UPDATE privilege
+on at least one column of each locked table). Migration 006 uses a UUID default
+and needs no sequence privileges. Use least privilege; do not grant
 DDL privileges to the app. Treat the transaction table and backups as sensitive.
 Schedule a trusted database cleanup for expired transaction rows, e.g.
 `DELETE FROM public.account_link_transactions WHERE expires_at < now()`.
