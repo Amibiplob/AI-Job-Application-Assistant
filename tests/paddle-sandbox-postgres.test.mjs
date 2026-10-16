@@ -23,7 +23,7 @@ const api = {
   createCheckout: async intent => {
     creates++; if (failCreate) throw new Error("Uncertain provider outcome");
     const id = pid("txn", creates === 1 ? "a" : "b");
-    transactions.set(id, { id, status: "draft", items, customer_id: null, subscription_id: null, currency_code: "USD", billing_period: null, custom_data: { link_intent: intent } });
+    transactions.set(id, { id, status: "draft", items, customer_id: null, subscription_id: null, currency_code: "USD", details: { totals: { grand_total: "1000" } }, billing_period: null, custom_data: { link_intent: intent } });
     return id;
   },
   transaction: async id => { if (!transactions.has(id)) throw new Error("Unavailable"); return transactions.get(id); },
@@ -287,7 +287,7 @@ test("isolated entitlement fixtures validate Free 3 / Pro 100 and downgrade with
   assert.ok(subscription);
 });
 
-test("004-009 migrate an existing 001-003 database transactionally without backfills", async () => {
+test("004-010 migrate an existing 001-003 database transactionally without backfills", async () => {
   await pool.query("CREATE DATABASE paddle_sandbox_migration_test");
   const isolated = new Pool({ host: directory, port: 6554, user: "synthetic_operator", database: "paddle_sandbox_migration_test" });
   try {
@@ -315,4 +315,160 @@ test("004-009 migrate an existing 001-003 database transactionally without backf
     await isolated.query("DELETE FROM users WHERE id=$1", [userA]);
     assert.equal((await isolated.query("SELECT * FROM paddle_sandbox_accounts")).rowCount, 0);
   } finally { await isolated.end(); await pool.query("DROP DATABASE paddle_sandbox_migration_test"); }
+});
+
+// Synthetic configuration only. No request leaves the in-memory API above.
+function enableEntitlements(t) {
+  const values = { PADDLE_SANDBOX_ENABLED: "true", BILLING_DEPLOYMENT_ENV: "sandbox",
+    PADDLE_SANDBOX_ENTITLEMENTS_ENABLED: "true", PADDLE_SANDBOX_API_KEY: `pdl_sdbx_apikey_${"k".repeat(32)}`,
+    PADDLE_SANDBOX_WEBHOOK_SECRET: "synthetic-secret-for-testing-only-32", PADDLE_SANDBOX_CLIENT_TOKEN: `test_${"t".repeat(32)}`,
+    PADDLE_SANDBOX_PRICE_ID: config.priceId, APP_BASE_URL: "https://sandbox.example.test", VERCEL_ENV: "preview", DEPLOYMENT_ENV: "sandbox" };
+  const previous = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+  Object.assign(process.env, values);
+  t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  return createMonetizationStore(pool);
+}
+
+test("verified sandbox payment atomically activates correct account and enforces 100 successful matches", async t => {
+  const meter = enableEntitlements(t);
+  const { original, subscription } = await completed();
+  assert.equal((await meter.getEntitlement(userA)).plan, "free"); // Checkout creates no access.
+  original.status = "paid";
+  await assert.rejects(store.processEvent(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  original.status = "completed";
+  const raw = Buffer.from(JSON.stringify(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  const ts = Math.floor(Date.now() / 1000);
+  const secret = process.env.PADDLE_SANDBOX_WEBHOOK_SECRET;
+  assert.throws(() => verifyWebhook(raw, `ts=${ts};h1=${"0".repeat(64)}`, secret));
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  const header = `ts=${ts};h1=${createHmac("sha256", secret).update(`${ts}:`).update(raw).digest("hex")}`;
+  const activation = verifyWebhook(raw, header, secret);
+  await Promise.all(Array.from({ length: 6 }, () => store.processEvent(activation)));
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+  assert.equal((await meter.getEntitlement(userB)).plan, "free");
+  await assert.rejects(meter.runWithMonthlyUsage(userA, "job_analysis", () => { throw Error("failed computation"); }));
+  assert.equal((await meter.getMonthlyUsage(userA, "job_analysis")).used, 0);
+  await meter.consumeMonthlyUsage(userA, "job_analysis", 95);
+  const decisions = await Promise.all(Array.from({ length: 12 }, () => meter.runWithMonthlyUsage(userA, "job_analysis", () => "match")));
+  assert.equal(decisions.filter(d => d.allowed).length, 5);
+  assert.equal((await meter.getMonthlyUsage(userA, "job_analysis")).used, 100);
+  process.env.PADDLE_SANDBOX_ENTITLEMENTS_ENABLED = "false";
+  assert.equal((await meter.getEntitlement(userA)).plan, "free"); // Read-side kill switch.
+  process.env.PADDLE_SANDBOX_ENTITLEMENTS_ENABLED = "true";
+  process.env.DEPLOYMENT_ENV = "production";
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+});
+
+test("cancellation and failed renewal retain paid-through; clock expiration has zero grace", async t => {
+  const meter = enableEntitlements(t); const { subscription } = await completed();
+  await store.reconcileUser(userA, sessionA);
+  await meter.consumeMonthlyUsage(userA, "job_analysis", 4);
+  for (const [index, status] of ["past_due", "canceled"].entries()) {
+    subscription.status = status; subscription.updated_at = new Date(now + index).toISOString();
+    await store.reconcileUser(userA, sessionA);
+    assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+    assert.equal((await meter.getMonthlyUsage(userA, "job_analysis")).used, 4);
+  }
+  // Move both persisted verified copies to the same elapsed period so the
+  // denial exercises the clock, rather than the provenance mismatch guard.
+  await pool.query(`WITH elapsed AS (
+    UPDATE paddle_sandbox_accounts SET paid_start=statement_timestamp()-interval '1 day',paid_through=statement_timestamp()
+    WHERE user_id=$1 RETURNING paid_start,paid_through
+  ) UPDATE subscription_entitlements SET current_period_start=elapsed.paid_start,current_period_end=elapsed.paid_through
+    FROM elapsed WHERE user_id=$1`, [userA]);
+  const usage = await meter.consumeMonthlyUsage(userA, "job_analysis");
+  assert.equal(usage.allowed, false); assert.equal(usage.plan, "free"); assert.equal(usage.used, 4);
+});
+
+test("approved refunds and disputes revoke atomically with concurrent admissions and stale deliveries", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed();
+  await store.reconcileUser(userA, sessionA); await meter.consumeMonthlyUsage(userA, "job_analysis", 3);
+  const refund = { id: pid("adj"), transaction_id: original.id, subscription_id: subscription.id, customer_id: subscription.customer_id, action: "refund", status: "pending_approval" };
+  adjustments.set(refund.id, refund);
+  await store.processEvent(event("adjustment.created", "a", refund.id));
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+  refund.status = "approved";
+  await Promise.all([store.processEvent(event("adjustment.updated", "b", refund.id)), store.reconcileBatch(),
+    ...Array.from({ length: 5 }, () => meter.consumeMonthlyUsage(userA, "job_analysis"))]);
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  assert.equal((await meter.consumeMonthlyUsage(userA, "job_analysis")).allowed, false);
+  adjustments.clear();
+  await store.processEvent(event("subscription.activated", "c", subscription.id));
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  const renewal = { ...original, id: pid("txn", "r"), billing_period: { starts_at: new Date(now - 3600000).toISOString(), ends_at: new Date(now + 30 * 86400000).toISOString() } };
+  transactions.set(renewal.id, renewal); payments.set(subscription.id, renewal);
+  await store.reconcileUser(userA, sessionA);
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+  // An approved adjustment on the old period must not revoke a newer payment.
+  adjustments.set(refund.id, refund);
+  await store.processEvent(event("adjustment.updated", "d", refund.id));
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+  for (const action of ["chargeback", "chargeback_warning"]) {
+    adjustments.set(pid("adj", "r"), { ...refund, id: pid("adj", "r"), transaction_id: renewal.id, action });
+    await store.reconcileUser(userA, sessionA);
+    assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  }
+});
+
+test("forged relationships, duplicates, no payment and conflicting ownership cannot grant or overwrite access", async t => {
+  const meter = enableEntitlements(t); const a = await completed(), b = await completed(userB, sessionB, "b");
+  await assert.rejects(store.reconcileUser(userA, sessionB));
+  await assert.rejects(store.processEvent(event("subscription.created", "a", a.subscription.id, b.original.custom_data)));
+  a.original.details.totals.grand_total = "0";
+  await assert.rejects(store.reconcileUser(userA, sessionA));
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  a.original.details.totals.grand_total = "1000";
+  subscriptions.set(pid("sub", "c"), { ...a.subscription, id: pid("sub", "c") });
+  await assert.rejects(store.processEvent(event("subscription.created", "c", pid("sub", "c"), a.original.custom_data)));
+  await pool.query("INSERT INTO subscription_entitlements(user_id) VALUES ($1)", [userA]);
+  await assert.rejects(store.reconcileUser(userA, sessionA));
+  assert.equal((await store.status(userA)).subscriptionStatus, null); // All billing writes rolled back.
+  assert.equal((await pool.query("SELECT source FROM subscription_entitlements WHERE user_id=$1", [userA])).rows[0].source, "manual");
+  assert.equal((await meter.getEntitlement(userB)).plan, "free");
+});
+
+test("bounded workers activate and revoke entitlements with no separate mutation path", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed();
+  const results = await Promise.all([store.reconcileBatch(), store.reconcileBatch()]);
+  assert.equal(results.reduce((sum, r) => sum + r.ok, 0), 1);
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+  adjustments.set(pid("adj"), { id: pid("adj"), transaction_id: original.id, subscription_id: subscription.id, customer_id: subscription.customer_id, action: "refund", status: "approved" });
+  await pool.query("UPDATE paddle_sandbox_accounts SET next_reconcile_at=now()-interval '1 second'");
+  assert.equal((await store.reconcileBatch()).ok, 1);
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+});
+
+test("canonical refund detail revokes despite stale list; waiting quota sees committed downgrade", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed();
+  await store.reconcileUser(userA, sessionA); await meter.consumeMonthlyUsage(userA, "job_analysis", 3);
+  const refund = { id: pid("adj"), transaction_id: original.id, subscription_id: subscription.id, customer_id: subscription.customer_id, action: "refund", status: "approved" };
+  adjustments.set(refund.id, refund);
+  const readTransaction = api.transaction; const list = api.adjustments;
+  let entered, release;
+  const started = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  api.transaction = async id => { const value = await readTransaction(id); entered(); await gate; return value; };
+  api.adjustments = async () => [];
+  t.after(() => { api.adjustments = list; api.transaction = readTransaction; });
+  const revocation = store.processEvent(event("adjustment.updated", "a", refund.id));
+  await started; // Reconciliation holds the owner lock before canonical API reads.
+  const admission = meter.consumeMonthlyUsage(userA, "job_analysis");
+  release(); await revocation;
+  const decision = await admission;
+  assert.equal(decision.allowed, false); assert.equal(decision.plan, "free"); assert.equal(decision.used, 3);
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+});
+
+test("refund observed while activation is disabled cannot resurrect access when switch returns", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed();
+  await store.reconcileUser(userA, sessionA);
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+  process.env.PADDLE_SANDBOX_ENTITLEMENTS_ENABLED = "false";
+  adjustments.set(pid("adj"), { id: pid("adj"), transaction_id: original.id, subscription_id: subscription.id, customer_id: subscription.customer_id, action: "refund", status: "approved" });
+  subscriptions.delete(subscription.id); // Refund must not require subscription API availability.
+  await store.processEvent(event("adjustment.updated", "a", pid("adj")));
+  process.env.PADDLE_SANDBOX_ENTITLEMENTS_ENABLED = "true";
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  assert.equal((await meter.getMonthlyUsage(userA, "job_analysis")).limit, 3);
 });

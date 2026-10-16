@@ -54,7 +54,7 @@ before(async () => {
   await pool.query("INSERT INTO resumes(user_id,name,content) VALUES ($1,'Synthetic','Synthetic resume')", [userId]);
   const before = {};
   for (const table of ["users", "sessions", "resumes"]) before[table] = (await pool.query(`SELECT * FROM ${table}`)).rows;
-  const migrations = await Promise.all(["004_subscription_entitlements.sql", "005_monthly_usage.sql"].map(file => readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
+  const migrations = await Promise.all(["004_subscription_entitlements.sql", "005_monthly_usage.sql", "008_paddle_sandbox_accounts.sql", "009_paddle_sandbox_reconciliation.sql", "010_sandbox_entitlement_provenance.sql"].map(file => readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -124,8 +124,30 @@ test("only current active or trialing Pro periods grant Pro; cancellation at per
 });
 
 test("concurrent instances admit exactly Free budget and never increment on denial", async () => {
-  const stores = Array.from({ length: 4 }, () => createMonetizationStore(pool));
-  const results = await Promise.all(Array.from({ length: 40 }, (_, i) => stores[i % 4].consumeMonthlyUsage(userId, "job_analysis")));
+  // Establish the harness's 20 sockets sequentially before exercising quota
+  // contention. Keep its 500 ms deadline unchanged; cold PostgreSQL startup
+  // under build load is independent of admission serialization. Pool exhaustion
+  // is covered separately below, including fail-closed accounting.
+  const warmed = [];
+  try { for (let i = 0; i < 20; i++) warmed.push(await pool.connect()); }
+  finally { for (const client of warmed) client.release(); }
+  const observedDb = {
+    query: (...args) => pool.query(...args),
+    async connect() {
+      try { return await pool.connect(); }
+      catch (error) {
+        // Disposable DB only. Report a classification, never raw connection data.
+        console.error("quota concurrency diagnostic", { phase: "pool-acquisition",
+          timeout: /timeout exceeded when trying to connect|Connection terminated due to connection timeout/.test(error.message) });
+        throw error;
+      }
+    },
+  };
+  const stores = Array.from({ length: 4 }, () => createMonetizationStore(observedDb));
+  // Settle every admission before teardown, including on infrastructure failure.
+  const settled = await Promise.allSettled(Array.from({ length: 40 }, (_, i) => stores[i % 4].consumeMonthlyUsage(userId, "job_analysis")));
+  assert.equal(settled.filter(result => result.status === "rejected").length, 0, "Quota admission failed; inspect classified pool diagnostics.");
+  const results = settled.map(result => result.value);
   assert.equal(results.filter(result => result.allowed).length, 3);
   const before = (await pool.query("SELECT * FROM monthly_usage")).rows;
   assert.equal((await store.consumeMonthlyUsage(userId, "job_analysis")).allowed, false);
@@ -301,4 +323,20 @@ test("reviewed account deletion handles new cascades and retains minimal billing
   assert.equal((await store.getMonthlyUsage(otherId, "job_analysis")).used, 1);
   assert.equal((await pool.query("SELECT count(*)::int AS count FROM billing_events")).rows[0].count, 1);
   assert.equal((await run("delete")).status, "not-found");
+});
+
+test("pool starvation reproduces redacted quota failure without granting or consuming a unit", async () => {
+  // The Phase 7 harness has a 500 ms acquisition deadline. Holding its 20
+  // connections reproduces the same DAL error deterministically, without
+  // changing production timeouts or retrying an outcome-uncertain transaction.
+  const held = [];
+  try {
+    for (let i = 0; i < 20; i++) held.push(await pool.connect());
+    const rawFailure = await pool.connect().catch(error => error);
+    assert.match(rawFailure.message, /timeout exceeded when trying to connect/);
+    await assert.rejects(store.consumeMonthlyUsage(userId, "job_analysis"), /^Error: Monetization operation failed or outcome could not be confirmed\.$/);
+  } finally { for (const client of held) client.release(); }
+  assert.equal((await store.getMonthlyUsage(userId, "job_analysis")).used, 0);
+  const decisions = await Promise.all(Array.from({ length: 40 }, () => store.consumeMonthlyUsage(userId, "job_analysis")));
+  assert.equal(decisions.filter(d => d.allowed).length, 3);
 });

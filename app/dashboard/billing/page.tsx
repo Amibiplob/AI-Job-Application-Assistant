@@ -19,12 +19,12 @@ export default async function BillingPage() {
   return <div className="mx-auto max-w-3xl space-y-6 p-6 text-text-primary">
     <h1 className="text-2xl font-semibold">Billing status</h1>
     <p>{usage ? `Website plan: ${usage.plan === "pro" ? "Pro" : "Free"}. ${usage.remaining} of ${usage.limit} matches remaining this month.` : "Website plan and usage are unavailable. Refresh to retry."}</p>
-    <p>Paddle integration is for sandbox testing only. Test payments do not activate Pro access.</p>
+    <p>Paddle integration is for sandbox testing only. Verified payments can activate test Pro access when sandbox activation is enabled.</p>
     {!config ? <p>Sandbox checkout is disabled.</p> : unavailable ? <p>Sandbox billing records are unavailable. Checkout cannot start.</p> : <>
       <p>Sandbox subscription: {status?.subscriptionStatus ?? "None verified"}.</p>
-      {status && <p>Sandbox access preview: {status.sandboxAccessPreview === "pro" ? "Pro" : "Free"}. Your actual website plan is unchanged.</p>}
-      {status?.paymentRevoked && <p>The verified sandbox payment was refunded or disputed. Its access preview is revoked pending operator review or a new paid period.</p>}
-      {status?.paidThrough && <p>Last verified sandbox paid-through time: <time dateTime={status.paidThrough}>{status.paidThrough}</time>. This is a test record, not your website entitlement.</p>}
+      {status && <p>Sandbox access preview: {status.sandboxAccessPreview === "pro" ? "Pro" : "Free"}. Your current website plan is shown above.</p>}
+      {status?.paymentRevoked && <p>The verified sandbox payment was refunded or disputed. Access from that payment is revoked.</p>}
+      {status?.paidThrough && <p>Last verified sandbox paid-through time: <time dateTime={status.paidThrough}>{status.paidThrough}</time>. Access ends at the verified paid-through time unless revoked earlier.</p>}
       {status?.cancelAtPeriodEnd && <p>The sandbox subscription is scheduled to cancel.</p>}
       {status?.reconciledAt && <p>Last checked: <time dateTime={status.reconciledAt}>{status.reconciledAt}</time>. Status may change; refresh from Paddle below.</p>}
       {(!status || status.checkoutState === "ready") && <form method="post" action="/api/billing/paddle/checkout"><button className="min-h-11 rounded-lg bg-brand px-5 text-primary-foreground" type="submit">Open sandbox checkout</button></form>}

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Pool, PoolClient } from "pg";
+import { sandboxEntitlementsEnabled } from "@/lib/billing/paddle/config";
 
 export type Plan = "free" | "pro";
 export type UsageMetric = "job_analysis";
@@ -16,8 +17,14 @@ export type MeteredResult<T> =
   | { allowed: false; usage: Usage };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const entitlementSql = `SELECT CASE WHEN e.plan = 'pro'
+const entitlementSql = () => `SELECT CASE WHEN e.plan = 'pro'
   AND e.status IN ('active', 'trialing')
+  AND (e.source <> 'paddle_sandbox' OR (${sandboxEntitlementsEnabled() ? 'TRUE' : 'FALSE'} AND EXISTS (
+    SELECT 1 FROM public.paddle_sandbox_accounts p WHERE p.user_id=u.id
+      AND p.subscription_id=e.source_subscription_id AND p.verified_payment_id IS NOT NULL
+      AND NOT p.payment_revoked AND p.subscription_status IN ('active','past_due','canceled')
+      AND p.paid_start=e.current_period_start AND p.paid_through=e.current_period_end
+  )))
   AND e.current_period_start <= statement_timestamp()
   AND e.current_period_end > statement_timestamp()
   THEN 'pro' ELSE 'free' END AS plan,
@@ -43,7 +50,7 @@ function usage(row: EntitlementRow, used: number): Usage {
  * headers, email matching, or a JWT UUID guess. No authentication is performed here. */
 export function createMonetizationStore(db: Pick<Pool, "query" | "connect">) {
   async function readEntitlement(client: Pick<PoolClient, "query">, userId: string) {
-    const result = await client.query<EntitlementRow>(entitlementSql, [userId]);
+    const result = await client.query<EntitlementRow>(entitlementSql(), [userId]);
     const row = result.rows[0];
     if (!row || !["free", "pro"].includes(row.plan)) throw new Error("Account unavailable.");
     return row;
@@ -104,7 +111,7 @@ export function createMonetizationStore(db: Pick<Pool, "query" | "connect">) {
       validateUser(userId); validateMetric(metric);
       // One statement keeps the entitlement and UTC month snapshot consistent.
       try {
-        const result = await db.query<EntitlementRow & { used: number }>(`WITH entitlement AS (${entitlementSql})
+        const result = await db.query<EntitlementRow & { used: number }>(`WITH entitlement AS (${entitlementSql()})
           SELECT e.*, COALESCE(m.used, 0)::int AS used FROM entitlement e
           LEFT JOIN public.monthly_usage m ON m.user_id = $1::uuid AND m.metric = $2
             AND m.month_start = e.month_start::date`, [userId, metric]);

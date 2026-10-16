@@ -18,7 +18,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   }
   return <main className="mx-auto max-w-2xl space-y-6 p-8 text-text-primary">
     <h1 className="text-2xl font-semibold">Sandbox checkout</h1>
-    <p>Test payments only. Completing checkout will not upgrade your website plan.</p>
+    <p>Test payments only. Access changes only after server verification when sandbox activation is enabled.</p>
     {allowed && config && typeof id === "string" ? <SandboxCheckout clientToken={config.clientToken} transactionId={id} /> : <p>Checkout is disabled, expired, or unavailable for this account.</p>}
     <Link className="text-brand underline" href="/dashboard/billing">Return to billing status</Link>
   </main>;

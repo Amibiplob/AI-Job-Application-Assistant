@@ -7,10 +7,11 @@ import { spawnSync } from "node:child_process";
 const require = createRequire(import.meta.url); require("tsx/cjs");
 const Module = require("node:module"); const original = Module._load;
 Module._load = function(id, ...args) { if (id === "server-only") return {}; return original.call(this, id, ...args); };
-let protocol, getConfig, clientFactory, getWorkerConfig;
+let protocol, getConfig, clientFactory, getWorkerConfig, entitlementGate;
 try {
   protocol = require("../lib/billing/paddle/protocol.ts");
   getConfig = require("../lib/billing/paddle/config.ts").getPaddleSandboxConfig;
+  entitlementGate = require("../lib/billing/paddle/config.ts").sandboxEntitlementsEnabled;
   clientFactory = require("../lib/billing/paddle/client.ts").createPaddleSandboxClient;
   getWorkerConfig = require("../lib/billing/paddle/worker-config.ts").getSandboxWorkerConfig;
 } finally { Module._load = original; }
@@ -24,7 +25,7 @@ const items = [{ quantity: 1, price: { id: config.priceId } }];
 const sub = { id: pid("sub"), customer_id: pid("ctm"), status: "active", updated_at: start, items,
   current_billing_period: { starts_at: start, ends_at: end }, scheduled_change: null, custom_data: null };
 const payment = { id: pid("txn"), status: "completed", customer_id: sub.customer_id, subscription_id: sub.id, items,
-  custom_data: null, billing_period: { starts_at: start, ends_at: end }, currency_code: "USD" };
+  custom_data: null, billing_period: { starts_at: start, ends_at: end }, currency_code: "USD", details: { totals: { grand_total: "1000" } } };
 const event = { event_id: pid("evt"), event_type: "subscription.activated", occurred_at: start, data: { id: sub.id } };
 const raw = Buffer.from(JSON.stringify(event)); const ts = Math.floor(now / 1000);
 const signature = (body = raw, timestamp = ts) => `ts=${timestamp};h1=${createHmac("sha256", config.webhookSecret).update(`${timestamp}:`).update(body).digest("hex")}`;
@@ -91,9 +92,10 @@ test("checkout transaction uses only server price, quantity and opaque intent; i
     currency_code: "USD", custom_data: { link_intent: intent }, checkout: { url: config.checkoutUrl } });
   request = null; await assert.rejects(client.subscription("../users")); assert.equal(request, null);
 });
-test("sandbox integration has no entitlement, quota, Auth0 or MCP activation path", async () => {
+test("sandbox integration has no quota writes and keeps the entitlement writer behind an independent sandbox gate", async () => {
   const store = await readFile(new URL("../lib/billing/paddle/store.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(store, /(?:INSERT INTO|UPDATE|DELETE FROM)\s+(?:public\.)?(subscription_entitlements|monthly_usage)/i);
+  assert.doesNotMatch(store, /(?:INSERT INTO|UPDATE|DELETE FROM)\s+(?:public\.)?monthly_usage/i);
+  assert.match(store, /if \(sandboxEntitlementsEnabled\(\)\)/);
   const migration = await readFile(new URL("../migrations/008_paddle_sandbox_accounts.sql", import.meta.url), "utf8");
   assert.doesNotMatch(migration, /(?:INSERT INTO|UPDATE|DELETE FROM|ALTER TABLE)\s+(?:public\.)?(subscription_entitlements|monthly_usage)/i);
 });
@@ -148,4 +150,15 @@ test("adjustment API uses bounded pagination, never follows returned URLs, and f
   let page = 0;
   await assert.rejects(clientFactory(config, async () => Response.json({ data: [{ ...adjustment, id: pid("adj", String(++page)) }], meta: { pagination: { has_more: true } } })).adjustments(payment.id));
   assert.equal(page, 5);
+});
+
+
+test("entitlement switch requires explicit valid sandbox configuration and blocks production", () => {
+  assert.equal(entitlementGate({}), false);
+  assert.equal(entitlementGate(env), false);
+  const enabled = { ...env, PADDLE_SANDBOX_ENTITLEMENTS_ENABLED: "true" };
+  assert.equal(entitlementGate(enabled), true);
+  for (const override of [{ PADDLE_SANDBOX_ENABLED: "false" }, { DEPLOYMENT_ENV: "production" }, { VERCEL_ENV: "production" },
+    { BILLING_DEPLOYMENT_ENV: "production" }, { PADDLE_SANDBOX_API_KEY: "" }, { PADDLE_SANDBOX_ENTITLEMENTS_ENABLED: "TRUE" }])
+    assert.equal(entitlementGate({ ...enabled, ...override }), false);
 });

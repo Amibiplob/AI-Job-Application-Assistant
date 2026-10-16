@@ -11,6 +11,7 @@ export const transactionSchema = z.object({
   subscription_id: paddleId("sub").nullable(), items: z.array(itemSchema),
   custom_data: z.record(z.string(), z.unknown()).nullable(),
   billing_period: period.nullable(), currency_code: z.string(),
+  details: z.object({ totals: z.object({ grand_total: z.string().regex(/^\d+$/) }) }).nullable().optional(),
 });
 export const subscriptionSchema = z.object({
   id: paddleId("sub"), customer_id: paddleId("ctm"),
@@ -56,7 +57,7 @@ export function supportedEvent(event: PaddleEvent): boolean {
 }
 
 // Conservative sandbox policy: any approved refund (including partial),
-// chargeback or chargeback warning invalidates this payment's access preview.
+// chargeback or chargeback warning invalidates this payment's access.
 export function paymentIsRevoked(payment: Transaction, adjustments: Adjustment[]) {
   for (const adjustment of adjustments) {
     if (adjustment.transaction_id !== payment.id || adjustment.subscription_id !== payment.subscription_id ||
@@ -69,7 +70,7 @@ export function assertPlanItems(items: z.infer<typeof itemSchema>[], priceId: st
   if (items.length !== 1 || items[0].price.id !== priceId || items[0].quantity !== 1) throw new Error("Unsupported subscription.");
 }
 
-// A preview only. No caller writes this projection to subscription_entitlements.
+// Verified period policy shared by preview and the gated sandbox writer.
 // Completed payment periods, not a renewed unpaid billing period, bound access.
 export function projectSandboxSubscription(subscription: Subscription, completed: Transaction | null, priceId: string, now = Date.now()) {
   assertPlanItems(subscription.items, priceId);
@@ -77,6 +78,7 @@ export function projectSandboxSubscription(subscription: Subscription, completed
   if (completed) {
     assertPlanItems(completed.items, priceId);
     if (completed.status !== "completed" || completed.currency_code !== "USD" ||
+        !completed.details || !/^[0-9]*[1-9][0-9]*$/.test(completed.details.totals.grand_total) ||
         completed.subscription_id !== subscription.id || completed.customer_id !== subscription.customer_id) throw new Error("Payment relationship mismatch.");
     const p = completed.billing_period;
     if (p && Date.parse(p.starts_at) < Date.parse(p.ends_at)) {

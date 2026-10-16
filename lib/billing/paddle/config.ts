@@ -20,3 +20,8 @@ export function getPaddleSandboxConfig(env: NodeJS.ProcessEnv = process.env): Pa
     return { apiKey, webhookSecret, clientToken, priceId, appOrigin: url.origin, checkoutUrl: `${url.origin}/billing/checkout` };
   } catch { return null; }
 }
+
+// Independent kill switch: both reads and writes require a valid sandbox runtime.
+export function sandboxEntitlementsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.PADDLE_SANDBOX_ENTITLEMENTS_ENABLED === "true" && getPaddleSandboxConfig(env) !== null;
+}

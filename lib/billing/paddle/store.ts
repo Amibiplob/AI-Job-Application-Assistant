@@ -2,9 +2,9 @@ import "server-only";
 import { z } from "zod";
 import type { Pool, PoolClient } from "pg";
 import { createMonetizationStore } from "@/lib/monetization/store";
-import type { PaddleSandboxConfig } from "./config";
+import { sandboxEntitlementsEnabled, type PaddleSandboxConfig } from "./config";
 import type { PaddleSandboxClient } from "./client";
-import { assertPlanItems, paddleId, paymentIsRevoked, projectSandboxSubscription, supportedEvent, type PaddleEvent } from "./protocol";
+import { assertPlanItems, paddleId, paymentIsRevoked, projectSandboxSubscription, supportedEvent, type PaddleEvent, type Adjustment } from "./protocol";
 
 type Row = {
   user_id: string; intent_id: string; transaction_id: string | null; customer_id: string | null;
@@ -38,7 +38,7 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
       AND expires_at>clock_timestamp()`, [sessionId, userId]);
     if (result.rowCount !== 1) throw new Error("Session unavailable.");
   }
-  async function reconcile(client: PoolClient, row: Row, subscriptionId: string, eventAt?: string) {
+  async function reconcile(client: PoolClient, row: Row, subscriptionId: string, eventAt?: string, adjustment?: Adjustment | null) {
     if (!row.transaction_id) throw new Error("Checkout creation pending.");
     if (row.subscription_id && row.subscription_id !== subscriptionId) throw new Error("Conflicting subscription.");
     // Fetch only AFTER taking the owner lock, serializing all reconciliation
@@ -52,7 +52,10 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
     await api.verifyPrice();
     const completed = await api.latestCompleted(subscription.id);
     const projection = projectSandboxSubscription(subscription, completed, config.priceId);
+    // A canonical single adjustment read is also evidence: a stale list must
+    // not hide a refund already confirmed by the provider's detail endpoint.
     const revoked = completed ? paymentIsRevoked(completed, await api.adjustments(completed.id)) ||
+      (adjustment?.transaction_id === completed.id && paymentIsRevoked(completed, [adjustment])) ||
       (row.verified_payment_id === completed.id && row.payment_revoked) : false;
     // Subscription updated_at does not order transactions or adjustments.
     // Keep a refund sticky for that payment, and reject regressing payment reads.
@@ -78,7 +81,23 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
       next_reconcile_at=clock_timestamp()+interval '15 minutes', last_reconcile_result='ok'
       WHERE user_id=$1::uuid`, [row.user_id, subscription.customer_id, subscription.id, projection.status,
       projection.providerUpdatedAt, projection.paidStart, projection.paidThrough, projection.cancelAtPeriodEnd, eventAt ?? null, completed?.id ?? null, revoked]);
-    // Intentionally NO subscription_entitlements or monthly_usage writes.
+    // Same transaction and owner lock as billing state, receipt and quota writers.
+    // Refuse to overwrite entitlements managed by another provider/operator.
+    if (sandboxEntitlementsEnabled()) {
+      const result = await client.query(`INSERT INTO public.subscription_entitlements
+        (user_id,source,source_subscription_id,plan,status,current_period_start,current_period_end,cancel_at_period_end)
+        VALUES ($1::uuid,'paddle_sandbox',$2,$3,$4,$5::timestamptz,$6::timestamptz,$7)
+        ON CONFLICT (user_id) DO UPDATE SET plan=EXCLUDED.plan,status=EXCLUDED.status,
+          current_period_start=EXCLUDED.current_period_start,current_period_end=EXCLUDED.current_period_end,
+          cancel_at_period_end=EXCLUDED.cancel_at_period_end,updated_at=clock_timestamp()
+        WHERE subscription_entitlements.source='paddle_sandbox'
+          AND subscription_entitlements.source_subscription_id=EXCLUDED.source_subscription_id
+        RETURNING user_id`, [row.user_id, subscription.id,
+        projection.wouldBePro && !revoked ? "pro" : "free",
+        projection.wouldBePro && !revoked ? "active" : "inactive",
+        projection.paidStart, projection.paidThrough, projection.cancelAtPeriodEnd]);
+      if (result.rowCount !== 1) throw new Error("Conflicting entitlement ownership.");
+    }
   }
   return {
     async checkout(userId: string, sessionId: string): Promise<string> {
@@ -120,7 +139,7 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
         paidThrough: row.paid_through?.toISOString() ?? null, reconciledAt: row.reconciled_at?.toISOString() ?? null,
         cancelAtPeriodEnd: row.cancel_at_period_end,
         paymentRevoked: row.payment_revoked,
-        // Shadow projection only. No entitlement writer exists in this phase.
+        // Diagnostic preview only; actual access uses the gated entitlement reader.
         sandboxAccessPreview: !row.payment_revoked && ["active", "past_due", "canceled"].includes(row.subscription_status ?? "") &&
           row.paid_start !== null && row.paid_start.getTime() <= Date.now() && row.paid_through !== null && row.paid_through.getTime() > Date.now() ? "pro" : "free" } : null;
     },
@@ -147,9 +166,24 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
         const transaction = !isSubscription ? await api.transaction(transactionId) : null;
         if (transaction && row.transaction_id !== transaction.id && row.subscription_id !== transaction.subscription_id) throw new Error("Unowned transaction.");
         if (adjustment && transaction && (adjustment.customer_id !== transaction.customer_id || adjustment.subscription_id !== transaction.subscription_id)) throw new Error("Unowned adjustment.");
+        // A verified approved adjustment for the persisted current payment can
+        // revoke independently of subscription replicas or a failing list API.
+        // Older-payment refunds still reconcile the independently newer period.
+        if (adjustment && transaction && row.verified_payment_id === transaction.id &&
+            row.subscription_id === transaction.subscription_id && row.customer_id === transaction.customer_id &&
+            paymentIsRevoked(transaction, [adjustment])) {
+          await client.query(`UPDATE public.paddle_sandbox_accounts SET payment_revoked=true,
+            last_event_at=GREATEST(last_event_at,$2::timestamptz),next_reconcile_at=clock_timestamp(),
+            reconcile_attempts=0,last_reconcile_result='ok'
+            WHERE user_id=$1::uuid`, [userId, event.occurred_at]);
+          if (sandboxEntitlementsEnabled()) await client.query(`UPDATE public.subscription_entitlements
+            SET plan='free',status='inactive',updated_at=clock_timestamp()
+            WHERE user_id=$1::uuid AND source='paddle_sandbox' AND source_subscription_id=$2`, [userId, row.subscription_id]);
+          return;
+        }
         const subId = isSubscription ? id : transaction?.subscription_id;
         if (!subId) return; // Initial failed/canceled checkout cannot grant anything.
-        await reconcile(client, row, subId, event.occurred_at);
+        await reconcile(client, row, subId, event.occurred_at, adjustment);
       });
     },
     async reconcileUser(userId: string, sessionId: string) {

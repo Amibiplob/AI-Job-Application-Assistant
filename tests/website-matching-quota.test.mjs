@@ -113,7 +113,7 @@ before(async () => {
     catch { await new Promise(resolve => setTimeout(resolve, 100)); }
   }
   assert.ok(ready);
-  for (const file of ["001_initial_schema.sql", "002_auth_sessions.sql", "003_rate_limits.sql", "004_subscription_entitlements.sql", "005_monthly_usage.sql"]) {
+  for (const file of ["001_initial_schema.sql", "002_auth_sessions.sql", "003_rate_limits.sql", "004_subscription_entitlements.sql", "005_monthly_usage.sql", "008_paddle_sandbox_accounts.sql", "009_paddle_sandbox_reconciliation.sql", "010_sandbox_entitlement_provenance.sql"]) {
     await pool.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
   }
 });

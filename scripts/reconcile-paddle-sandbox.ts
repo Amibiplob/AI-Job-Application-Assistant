@@ -1,5 +1,5 @@
 // One bounded pass, called by an operator's external scheduler. No dotenv import,
-// project pool, automatic migrations, live API host or entitlement writes.
+// project pool, automatic migrations, live API host. Entitlements require the separate sandbox kill switch.
 import { Pool } from "pg";
 import { getSandboxWorkerConfig } from "../lib/billing/paddle/worker-config";
 import { createPaddleSandboxClient } from "../lib/billing/paddle/client";
