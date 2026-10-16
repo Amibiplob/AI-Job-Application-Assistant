@@ -31,10 +31,15 @@ export const adjustmentSchema = z.object({
 export type Adjustment = z.infer<typeof adjustmentSchema>;
 export const eventSchema = z.object({
   event_id: paddleId("evt"), event_type: z.string().min(1).max(100), occurred_at: date,
-  data: z.object({ id: z.string(), subscription_id: paddleId("sub").nullable().optional(), transaction_id: paddleId("txn").optional(),
+  data: z.object({ id: z.string().max(100), subscription_id: paddleId("sub").nullable().optional(), transaction_id: paddleId("txn").optional(),
     custom_data: z.record(z.string(), z.unknown()).nullable().optional() }),
 });
 export type PaddleEvent = z.infer<typeof eventSchema>;
+
+const verifiedEvents = new WeakSet<object>();
+export function assertVerifiedWebhook(event: PaddleEvent) {
+  if (!verifiedEvents.has(event)) throw new Error("Verified webhook required.");
+}
 
 // Official documented ts:raw-body HMAC-SHA256 protocol. Verify BEFORE JSON parse.
 // Bound both old and future timestamps, support multiple h1 values for rotation.
@@ -48,7 +53,10 @@ export function verifyPaddleWebhook(raw: Buffer, header: string | null, secret: 
       Math.abs(now / 1000 - Number(ts)) > 5 || !signatures.length) throw new Error("Invalid webhook.");
   const hash = createHmac("sha256", secret).update(`${ts}:`).update(raw).digest();
   if (!signatures.some(value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value) && timingSafeEqual(hash, Buffer.from(value, "hex")))) throw new Error("Invalid webhook.");
-  try { return eventSchema.parse(JSON.parse(raw.toString("utf8"))); }
+  try { const event = eventSchema.parse(JSON.parse(raw.toString("utf8")));
+    if (event.data.custom_data) Object.freeze(event.data.custom_data);
+    Object.freeze(event.data); Object.freeze(event);
+    verifiedEvents.add(event); return event; }
   catch { throw new Error("Invalid webhook."); }
 }
 
@@ -95,16 +103,20 @@ export function projectSandboxSubscription(subscription: Subscription, completed
   };
 }
 
-export async function readRawWebhook(request: Request): Promise<Buffer> {
+export async function readRawWebhook(request: Request, timeoutMs = 1000): Promise<Buffer> {
   if (!request.body) throw new Error("Invalid webhook.");
   const reader = request.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
+  const deadline = Date.now() + timeoutMs;
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Webhook body timed out.")), timeoutMs); });
   try {
     while (true) {
-      const { done, value } = await reader.read(); if (done) break;
+      if (Date.now() >= deadline) throw new Error("Webhook body timed out.");
+      const { done, value } = await Promise.race([reader.read(), timeout]); if (done) break;
       size += value.byteLength;
-      if (size > 256 * 1024) { await reader.cancel(); throw new Error("Invalid webhook."); }
+      if (size > 256 * 1024) throw new Error("Invalid webhook.");
       chunks.push(value);
     }
     return Buffer.concat(chunks);
-  } finally { reader.releaseLock(); }
+  } finally { clearTimeout(timer!); void reader.cancel().catch(() => {}); reader.releaseLock(); }
 }

@@ -1,9 +1,9 @@
 import "server-only";
 import { getPaddleSandboxConfig } from "./config";
 
-export function getSandboxWorkerConfig(env: NodeJS.ProcessEnv = process.env) {
+export function getSandboxWorkerConfig(env: NodeJS.ProcessEnv = process.env, worker: "reconciliation" | "webhook" = "reconciliation") {
   const billing = getPaddleSandboxConfig(env);
-  if (!billing || env.PADDLE_RECONCILIATION_ENABLED !== "true") return null;
+  if (!billing || (worker === "webhook" ? env.PADDLE_WEBHOOK_WORKER_ENABLED : env.PADDLE_RECONCILIATION_ENABLED) !== "true") return null;
   try {
     // Separate connection only: no DATABASE_URL fallback, localhost TCP or remote
     // hosts. Initial worker rollout is restricted to an isolated Unix socket.

@@ -10,13 +10,15 @@ const session = { userId: "session-owner", id: "session-id" };
 Module._load = function(id, ...args) {
   if (id === "server-only") return {};
   if (id === "@/lib/auth") return { getSession: async () => authenticated ? session : null };
+  if (id === "@/lib/billing/paddle/ingestion-pool") return { ingestionPool: {} };
+  if (id === "@/lib/billing/paddle/inbox") return { createPaddleWebhookInbox: () => ({ ingest: async e => { calls.push(e); if (fail) throw Error("sensitive-secret"); } }) };
   if (id === "@/lib/db/pool") return { pool: {} };
   if (id === "@/lib/billing/paddle/config") return { getPaddleSandboxConfig: () => enabled ? config : null };
   if (id === "@/lib/billing/paddle/client") return { createPaddleSandboxClient: () => ({}) };
   if (id === "@/lib/billing/paddle/store") return { createPaddleSandboxStore: () => ({
     checkout: async (...args) => { calls.push(args); if (fail) throw Error("sensitive-secret"); return "txn_" + "a".repeat(26); },
     reconcileUser: async (...args) => { calls.push(args); if (fail) throw Error("sensitive-secret"); },
-    processEvent: async e => { calls.push(e); if (fail) throw Error("sensitive-secret"); },
+    processEvent: async () => { assert.fail("Webhook route must not reconcile inline"); },
   }) };
   return original.call(this, id, ...args);
 };

@@ -1,5 +1,8 @@
 # Phase 8 verification follow-up
 
+Architecture follow-up: [durable sandbox webhook ingestion and worker](paddle-webhook-processing.md).
+The verification results below are retained as historical evidence.
+
 Baseline: `32d01a5` (clean working tree at start). Date: 2026-10-16.
 Read with [Phase 8 implementation and staging runbook](saas-monetization-phase-8.md).
 

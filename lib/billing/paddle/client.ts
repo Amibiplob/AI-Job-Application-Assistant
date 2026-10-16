@@ -5,13 +5,13 @@ import { adjustmentSchema, assertPlanItems, paddleId, subscriptionSchema, transa
 
 // Raw Paddle Billing API adapter. No configurable host, live mode, redirects,
 // automatic POST retries, SDK logging, or production fallback exists.
-export function createPaddleSandboxClient(config: PaddleSandboxConfig, fetcher: typeof fetch = fetch) {
+export function createPaddleSandboxClient(config: PaddleSandboxConfig, fetcher: typeof fetch = fetch, deadline?: AbortSignal) {
   async function envelope(path: string, method = "GET", body?: unknown): Promise<{ data?: unknown; meta?: unknown }> {
     try {
       const response = await fetcher(`https://sandbox-api.paddle.com${path}`, {
         method, headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json", "Paddle-Version": "1" },
         ...(body ? { body: JSON.stringify(body) } : {}),
-        cache: "no-store", redirect: "error", signal: AbortSignal.timeout(3000),
+        cache: "no-store", redirect: "error", signal: deadline ? AbortSignal.any([deadline, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000),
       });
       if (!response.ok) throw new Error();
       return await response.json() as { data?: unknown; meta?: unknown };

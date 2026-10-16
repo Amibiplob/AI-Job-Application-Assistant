@@ -13,7 +13,7 @@ const sessionA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc", sessionB = "dddddddd-dd
 const pid = (prefix, char = "a") => `${prefix}_${char.repeat(26)}`;
 const config = { priceId: pid("pri") };
 const now = Date.now(); const start = new Date(now - 86400000).toISOString(), end = new Date(now + 86400000).toISOString();
-let directory, server, pool, store, createStore, transactions, subscriptions, failCreate, creates, payments, adjustments, verifyWebhook, createMonetizationStore;
+let directory, server, pool, store, createStore, transactions, subscriptions, failCreate, creates, payments, adjustments, verifyWebhook, createMonetizationStore, createInbox;
 const connectionClosures = [];
 const items = [{ quantity: 1, price: { id: config.priceId } }];
 const api = {
@@ -47,6 +47,7 @@ before(async () => {
   const require = createRequire(import.meta.url); require("tsx/cjs"); const Module = require("node:module"), original = Module._load;
   Module._load = function(id, ...args) { if (id === "server-only") return {}; return original.call(this, id, ...args); };
   try {
+    createInbox = require("../lib/billing/paddle/inbox.ts").createPaddleWebhookInbox;
     createStore = require("../lib/billing/paddle/store.ts").createPaddleSandboxStore;
     verifyWebhook = require("../lib/billing/paddle/protocol.ts").verifyPaddleWebhook;
     createMonetizationStore = require("../lib/monetization/store.ts").createMonetizationStore;
@@ -59,7 +60,7 @@ after(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 beforeEach(async () => {
-  await pool.query("TRUNCATE public.users,public.billing_events CASCADE");
+  await pool.query("TRUNCATE public.users,public.billing_events,public.paddle_sandbox_webhook_inbox CASCADE");
   await pool.query("INSERT INTO users(id,email) VALUES ($1,'a@example.test'),($2,'b@example.test')", [userA, userB]);
   await pool.query("INSERT INTO sessions(id,user_id,expires_at) VALUES ($1,$2,now()+interval '1 day'),($3,$4,now()+interval '1 day')", [sessionA, userA, sessionB, userB]);
   transactions = new Map(); subscriptions = new Map(); payments = new Map(); adjustments = new Map(); failCreate = false; creates = 0;
@@ -287,7 +288,7 @@ test("isolated entitlement fixtures validate Free 3 / Pro 100 and downgrade with
   assert.ok(subscription);
 });
 
-test("004-010 migrate an existing 001-003 database transactionally without backfills", async () => {
+test("004-011 migrate an existing 001-003 database transactionally without backfills", async () => {
   await pool.query("CREATE DATABASE paddle_sandbox_migration_test");
   const isolated = new Pool({ host: directory, port: 6554, user: "synthetic_operator", database: "paddle_sandbox_migration_test" });
   try {
@@ -471,4 +472,262 @@ test("refund observed while activation is disabled cannot resurrect access when 
   process.env.PADDLE_SANDBOX_ENTITLEMENTS_ENABLED = "true";
   assert.equal((await meter.getEntitlement(userA)).plan, "free");
   assert.equal((await meter.getMonthlyUsage(userA, "job_analysis")).limit, 3);
+});
+
+function signedDelivery(value) {
+  const raw = Buffer.from(JSON.stringify(value)); const ts = Math.floor(Date.now() / 1000);
+  const secret = "synthetic-inbox-signing-secret-32";
+  return verifyWebhook(raw, `ts=${ts};h1=${createHmac("sha256", secret).update(`${ts}:`).update(raw).digest("hex")}`, secret);
+}
+const processQueued = (client, e) => store.processEventInTransaction(client, e);
+const dueInbox = () => pool.query("UPDATE paddle_sandbox_webhook_inbox SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE state='pending'");
+
+test("durable ingress verifies provenance, strips payload PII, deduplicates concurrent deliveries and does no reconciliation", async () => {
+  const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  const unsigned = event("subscription.activated", "a", subscription.id, { ...original.custom_data, email: "never-store@example.test" });
+  await assert.rejects(inbox.ingest(unsigned), /Verified webhook required/);
+  const delivery = signedDelivery(unsigned);
+  const results = await Promise.all(Array.from({ length: 6 }, () => inbox.ingest(delivery)));
+  assert.equal(results.filter(r => !r.duplicate).length, 1);
+  const rows = (await pool.query("SELECT * FROM paddle_sandbox_webhook_inbox")).rows;
+  assert.equal(rows.length, 1); assert.equal(rows[0].state, "pending"); assert.equal(rows[0].attempts, 0);
+  assert.doesNotMatch(JSON.stringify(rows), /never-store|email|secret/);
+  assert.equal((await store.status(userA)).subscriptionStatus, null);
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 0);
+  assert.equal((await pool.query("SELECT * FROM subscription_entitlements")).rowCount, 0);
+  await assert.rejects(inbox.ingest(signedDelivery({ ...unsigned, data: { ...unsigned.data, id: pid("sub", "b") } })));
+  assert.equal((await pool.query("SELECT data_id FROM paddle_sandbox_webhook_inbox")).rows[0].data_id, subscription.id);
+});
+
+test("unsupported signed events are durably ignored; ingestion commit uncertainty safely deduplicates on redelivery", async () => {
+  const inbox = createInbox(pool);
+  const ignored = signedDelivery(event("customer.updated", "a", pid("ctm")));
+  await inbox.ingest(ignored);
+  assert.equal(await inbox.claim(), null);
+  assert.equal((await pool.query("SELECT state FROM paddle_sandbox_webhook_inbox")).rows[0].state, "ignored");
+  const uncertain = createInbox({ query: (...args) => pool.query(...args), async connect() {
+    const client = await pool.connect();
+    return { async query(options, args) {
+      const result = await client.query(options, args);
+      if ((options.text ?? options) === "COMMIT") throw Error("synthetic lost commit acknowledgement");
+      return result;
+    }, release: discard => client.release(discard) };
+  } });
+  const e = signedDelivery(event("subscription.updated", "b"));
+  await assert.rejects(uncertain.ingest(e), /outcome uncertain/);
+  assert.deepEqual(await inbox.ingest(e), { duplicate: true });
+  assert.equal((await pool.query("SELECT * FROM paddle_sandbox_webhook_inbox")).rowCount, 2);
+});
+
+test("overlapping inbox workers process one durable event once and grant only its verified owner", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  await inbox.ingest(signedDelivery(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  const results = await Promise.all([inbox.runBatch(processQueued), inbox.runBatch(processQueued)]);
+  assert.equal(results.reduce((sum, r) => sum + r.done, 0), 1);
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 1);
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+  assert.equal((await meter.getEntitlement(userB)).plan, "free");
+  assert.equal((await inbox.runBatch(processQueued)).selected, 0);
+});
+
+test("crash after durable claim recovers on lease expiry and fences the old worker token", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  await inbox.ingest(signedDelivery(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  const abandoned = await inbox.claim(); assert.equal(abandoned.attempts, 1);
+  assert.equal(await inbox.claim(), null);
+  await pool.query("UPDATE paddle_sandbox_webhook_inbox SET lease_until=clock_timestamp()-interval '1 second'");
+  const recovered = await inbox.claim(); assert.equal(recovered.attempts, 2); assert.notEqual(recovered.lease_token, abandoned.lease_token);
+  assert.equal(await inbox.processClaim(abandoned, () => assert.fail("Stale lease executed")), "skipped");
+  assert.equal(await inbox.processClaim(recovered, processQueued), "done");
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 1);
+});
+
+test("database worker crash after entitlement mutation rolls back grant and receipt before recovery", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  await inbox.ingest(signedDelivery(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  const job = await inbox.claim();
+  const result = await inbox.processClaim(job, async (client, e) => {
+    client.on("error", () => {}); // Expected termination of this disposable backend only.
+    await processQueued(client, e);
+    const pid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+    await pool.query("SELECT pg_terminate_backend($1)", [pid]);
+  });
+  assert.equal(result, "retry");
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 0);
+  await dueInbox(); assert.equal((await inbox.runBatch(processQueued)).done, 1);
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+});
+
+test("lost processing commit acknowledgement cannot regress a completed inbox job or reapply access", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  await inbox.ingest(signedDelivery(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  const job = await inbox.claim();
+  const uncertain = createInbox({ query: (...args) => pool.query(...args), async connect() {
+    const client = await pool.connect(); return { async query(sql, args) {
+      const result = await client.query(sql, args); if (sql === "COMMIT") throw Error("lost acknowledgement"); return result;
+    }, release: discard => client.release(discard) };
+  } });
+  assert.equal(await uncertain.processClaim(job, processQueued), "skipped");
+  assert.equal((await pool.query("SELECT state FROM paddle_sandbox_webhook_inbox")).rows[0].state, "done");
+  assert.equal((await meter.getEntitlement(userA)).plan, "pro");
+  assert.equal((await inbox.runBatch(processQueued)).selected, 0);
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 1);
+});
+
+test("provider outages back off and exhaust durably without granting; duplicate delivery cannot reset retries", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  const e = signedDelivery(event("subscription.activated", "a", subscription.id, original.custom_data));
+  await inbox.ingest(e); subscriptions.delete(subscription.id);
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    await dueInbox(); const result = await inbox.runBatch(processQueued);
+    assert.equal(result[attempt === 5 ? "failed" : "retry"], 1);
+    assert.equal((await inbox.runBatch(processQueued)).selected, 0);
+  }
+  await inbox.ingest(e);
+  const row = (await pool.query("SELECT * FROM paddle_sandbox_webhook_inbox")).rows[0];
+  assert.equal(row.state, "failed"); assert.equal(row.attempts, 5);
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 0);
+});
+
+test("a crash on the final lease becomes terminal; expired processing cannot commit a grant", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  await inbox.ingest(signedDelivery(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  const job = await inbox.claim();
+  assert.equal(await inbox.processClaim(job, async (client, e) => {
+    await processQueued(client, e);
+    await client.query("UPDATE paddle_sandbox_webhook_inbox SET lease_until=clock_timestamp()-interval '1 second'");
+  }), "retry");
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 0);
+  await dueInbox(); await inbox.claim();
+  await pool.query("UPDATE paddle_sandbox_webhook_inbox SET attempts=5,lease_until=clock_timestamp()-interval '1 second'");
+  assert.equal(await inbox.claim(), null);
+  const row = (await pool.query("SELECT state,last_error FROM paddle_sandbox_webhook_inbox")).rows[0];
+  assert.equal(row.state, "failed"); assert.equal(row.last_error, "lease_expired");
+});
+
+test("queue hints never reassign a subscription across accounts and worker failures isolate the next account", async t => {
+  const meter = enableEntitlements(t); const a = await completed(), b = await completed(userB, sessionB, "b"); const inbox = createInbox(pool);
+  await inbox.ingest(signedDelivery(event("subscription.activated", "a", a.subscription.id, b.original.custom_data)));
+  await inbox.ingest(signedDelivery(event("subscription.activated", "b", b.subscription.id, b.original.custom_data)));
+  const result = await inbox.runBatch(processQueued);
+  assert.equal(result.retry, 1); assert.equal(result.done, 1);
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  assert.equal((await meter.getEntitlement(userB)).plan, "pro");
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 1);
+});
+
+test("queued approved refund remains revoked after delayed activation and periodic reconciliation", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  await inbox.ingest(signedDelivery(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  await inbox.runBatch(processQueued); await meter.consumeMonthlyUsage(userA, "job_analysis", 4);
+  adjustments.set(pid("adj"), { id: pid("adj"), transaction_id: original.id, subscription_id: subscription.id, customer_id: subscription.customer_id, action: "refund", status: "approved" });
+  await inbox.ingest(signedDelivery(event("adjustment.updated", "b", pid("adj"))));
+  await inbox.runBatch(processQueued);
+  adjustments.clear(); // Stale replica cannot undo a verified refund.
+  await inbox.ingest(signedDelivery({ ...event("subscription.activated", "c", subscription.id), occurred_at: start }));
+  await Promise.all([inbox.runBatch(processQueued), store.reconcileUser(userA, sessionA)]);
+  const usage = await meter.consumeMonthlyUsage(userA, "job_analysis");
+  assert.equal(usage.allowed, false); assert.equal(usage.plan, "free"); assert.equal(usage.used, 4);
+});
+
+test("slow processing does not block durable ingestion and deleted owners cannot regain entitlements", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  await inbox.ingest(signedDelivery(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  let entered, release; const started = new Promise(resolve => { entered = resolve; }); const gate = new Promise(resolve => { release = resolve; });
+  const processing = inbox.runBatch(async (client, e) => { entered(); await gate; return processQueued(client, e); }, 1);
+  await started;
+  try { await inbox.ingest(signedDelivery(event("subscription.updated", "b", subscription.id))); }
+  finally { release(); }
+  assert.equal((await processing).done, 1);
+  await pool.query("DELETE FROM users WHERE id=$1", [userA]);
+  assert.equal((await inbox.runBatch(processQueued)).done, 1);
+  assert.equal((await pool.query("SELECT * FROM subscription_entitlements")).rowCount, 0);
+  assert.equal((await meter.getEntitlement(userB)).plan, "free");
+});
+
+test("inbox capacity refuses new events but keeps existing committed duplicate acknowledgements", async () => {
+  const inbox = createInbox(pool); const known = signedDelivery(event("subscription.updated", "z"));
+  await inbox.ingest(known);
+  await pool.query(`INSERT INTO paddle_sandbox_webhook_inbox(event_id,event_type,occurred_at,data_id,fingerprint,state,finished_at)
+    SELECT 'evt_'||lpad(to_hex(n),26,'0'),'customer.updated',now(),'synthetic',repeat('a',64),'ignored',now()
+    FROM generate_series(1,9999) n`);
+  assert.deepEqual(await inbox.ingest(known), { duplicate: true });
+  await assert.rejects(inbox.ingest(signedDelivery(event("subscription.updated", "y"))));
+  assert.equal((await pool.query("SELECT count(*)::int AS count FROM paddle_sandbox_webhook_inbox")).rows[0].count, 10000);
+});
+
+test("job deadline expiry rolls back a prepared entitlement grant before retry", async t => {
+  const meter = enableEntitlements(t); const { original, subscription } = await completed(); const inbox = createInbox(pool);
+  await inbox.ingest(signedDelivery(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  const job = await inbox.claim();
+  await assert.rejects(inbox.processClaim(job, processQueued, 25001), /Invalid job deadline/);
+  assert.equal(await inbox.processClaim(job, async (client, e, signal) => {
+    await processQueued(client, e);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(signal.aborted, true);
+  }, 10), "retry");
+  assert.equal((await meter.getEntitlement(userA)).plan, "free");
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 0);
+  await dueInbox(); assert.equal((await inbox.runBatch(processQueued)).done, 1);
+});
+
+test("ingestion lock contention fails closed within the SQL lock budget and remains redeliverable", async () => {
+  const blocker = await pool.connect(); const inbox = createInbox(pool);
+  const e = signedDelivery(event("subscription.updated", "a"));
+  try {
+    await blocker.query("BEGIN"); await blocker.query("SELECT pg_advisory_xact_lock(811011)");
+    await assert.rejects(inbox.ingest(e), /persistence unavailable/);
+    assert.equal((await pool.query("SELECT * FROM paddle_sandbox_webhook_inbox")).rowCount, 0);
+  } finally { await blocker.query("ROLLBACK"); blocker.release(); }
+  assert.deepEqual(await inbox.ingest(e), { duplicate: false });
+});
+
+test("actual webhook route persists a signed event before ack and never performs provider work", async () => {
+  const { original, subscription } = await completed();
+  const require = createRequire(import.meta.url), Module = require("node:module"), previous = Module._load;
+  Module._load = function(id, ...args) {
+    if (id === "server-only") return {};
+    if (id === "@/lib/billing/paddle/ingestion-pool") return { ingestionPool: pool };
+    if (id === "@/lib/billing/paddle/config") return { getPaddleSandboxConfig: () => ({ webhookSecret: "synthetic-route-inbox-signature-secret" }) };
+    if (["@/lib/billing/paddle/store", "@/lib/billing/paddle/client"].includes(id)) assert.fail("Route imported provider processing");
+    return previous.call(this, id, ...args);
+  };
+  let post; try { post = require("../app/api/billing/paddle/webhook/route.ts").POST; } finally { Module._load = previous; }
+  const raw = Buffer.from(JSON.stringify(event("subscription.activated", "a", subscription.id, original.custom_data)));
+  const ts = Math.floor(Date.now() / 1000);
+  const signature = `ts=${ts};h1=${createHmac("sha256", "synthetic-route-inbox-signature-secret").update(`${ts}:`).update(raw).digest("hex")}`;
+  const request = sig => new Request("https://sandbox.example.test/api/billing/paddle/webhook", { method: "POST", headers: { "Paddle-Signature": sig }, body: raw });
+  assert.equal((await post(request("forged"))).status, 400);
+  assert.equal((await pool.query("SELECT * FROM paddle_sandbox_webhook_inbox")).rowCount, 0);
+  subscriptions.clear(); // Canonical provider is unavailable; ingress must still ACK a durable event.
+  assert.equal((await post(request(signature))).status, 200);
+  assert.equal((await pool.query("SELECT state FROM paddle_sandbox_webhook_inbox")).rows[0].state, "pending");
+  assert.equal((await pool.query("SELECT * FROM billing_events")).rowCount, 0);
+  assert.equal((await pool.query("SELECT * FROM subscription_entitlements")).rowCount, 0);
+  await pool.query("ALTER TABLE paddle_sandbox_webhook_inbox RENAME TO temporarily_unavailable_inbox");
+  try { assert.equal((await post(request(signature))).status, 503); }
+  finally { await pool.query("ALTER TABLE temporarily_unavailable_inbox RENAME TO paddle_sandbox_webhook_inbox"); }
+});
+
+test("matching pool exhaustion is expected admission failure while a dedicated ingress pool still persists", async () => {
+  const ingress = new Pool({ host: directory, port: 6554, user: "synthetic_operator", database: "postgres",
+    max: 2, connectionTimeoutMillis: 250, query_timeout: 750, statement_timeout: 750 });
+  const closed = []; ingress.on("connect", client => closed.push(new Promise(resolve => client.once("end", resolve))));
+  const held = [];
+  try {
+    for (let i = 0; i < 10; i++) held.push(await pool.connect());
+    await assert.rejects(createMonetizationStore(pool).consumeMonthlyUsage(userA, "job_analysis"), /could not be confirmed/);
+    assert.deepEqual(await createInbox(ingress).ingest(signedDelivery(event("subscription.updated", "a"))), { duplicate: false });
+    assert.equal((await ingress.query("SELECT * FROM monthly_usage")).rowCount, 0);
+    assert.equal((await ingress.query("SELECT state FROM paddle_sandbox_webhook_inbox")).rows[0].state, "pending");
+  } finally {
+    for (const client of held) client.release();
+    await ingress.end(); await Promise.all(closed);
+  }
+  assert.equal((await createMonetizationStore(pool).consumeMonthlyUsage(userA, "job_analysis", 3)).allowed, true);
+  assert.equal((await createMonetizationStore(pool).consumeMonthlyUsage(userA, "job_analysis")).allowed, false);
 });

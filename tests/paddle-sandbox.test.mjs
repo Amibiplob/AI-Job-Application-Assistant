@@ -162,3 +162,33 @@ test("entitlement switch requires explicit valid sandbox configuration and block
     { BILLING_DEPLOYMENT_ENV: "production" }, { PADDLE_SANDBOX_API_KEY: "" }, { PADDLE_SANDBOX_ENTITLEMENTS_ENABLED: "TRUE" }])
     assert.equal(entitlementGate({ ...enabled, ...override }), false);
 });
+
+test("webhook body deadline rejects stalled streams even when cancellation never completes", async () => {
+  let cancelled = false;
+  const request = new Request("https://sandbox.example.test/webhook", { method: "POST", duplex: "half",
+    body: new ReadableStream({ pull() { return new Promise(() => {}); }, cancel() { cancelled = true; return new Promise(() => {}); } }) });
+  await assert.rejects(protocol.readRawWebhook(request, 20), /timed out/);
+  assert.equal(cancelled, true);
+});
+
+test("provider adapter propagates the worker deadline and redacts cancellation errors", async () => {
+  const deadline = new AbortController(); let started;
+  const entering = new Promise(resolve => { started = resolve; });
+  const client = clientFactory(config, async (_url, options) => {
+    started(); return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(Error("private upstream detail")), { once: true }));
+  }, deadline.signal);
+  const request = client.subscription(sub.id); await entering; deadline.abort();
+  await assert.rejects(request, error => error.message === "Sandbox billing service unavailable.");
+});
+
+test("webhook worker is independently disabled and retains isolated sandbox database guards", () => {
+  const values = { ...env, PADDLE_WEBHOOK_WORKER_ENABLED: "true", PADDLE_SANDBOX_DATABASE_URL: "postgresql:///paddle_sandbox_test?host=/tmp/paddle-test&user=synthetic_operator" };
+  assert.equal(getWorkerConfig(env, "webhook"), null);
+  assert.ok(getWorkerConfig(values, "webhook"));
+  assert.equal(getWorkerConfig(values), null); // Does not implicitly enable periodic reconciliation.
+  for (const change of [{ PADDLE_WEBHOOK_WORKER_ENABLED: "false" }, { VERCEL_ENV: "production" }, { PADDLE_SANDBOX_DATABASE_URL: "postgresql://remote.invalid/postgres" }])
+    assert.equal(getWorkerConfig({ ...values, ...change }, "webhook"), null);
+  const result = spawnSync(process.execPath, ["--conditions=react-server", "--import", "tsx", "scripts/process-paddle-sandbox-webhooks.ts"], {
+    cwd: process.cwd(), env: { ...process.env, PADDLE_SANDBOX_ENABLED: "false", PADDLE_WEBHOOK_WORKER_ENABLED: "false" }, encoding: "utf8" });
+  assert.equal(result.status, 1); assert.match(result.stderr, /disabled_or_failed/);
+});
