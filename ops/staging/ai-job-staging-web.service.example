@@ -1,0 +1,29 @@
+# Dedicated self-hosted staging website; expose only through an HTTPS proxy.
+[Unit]
+Description=Isolated AI Job staging website
+After=network.target
+
+[Service]
+Type=simple
+User=paddle-staging
+Group=paddle-staging
+WorkingDirectory=/srv/ai-job-staging/app
+ExecStart=/usr/bin/node scripts/run-isolated-staging.mjs web /etc/ai-job-staging/environment
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+PrivateTmp=false
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/srv/ai-job-staging/app /etc/ai-job-staging/environment
+ReadWritePaths=/tmp/paddle-staging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

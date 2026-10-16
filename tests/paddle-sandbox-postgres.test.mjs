@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { before, beforeEach, after, test } from "node:test";
-import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -294,13 +294,20 @@ test("004-011 migrate an existing 001-003 database transactionally without backf
   try {
     const files = (await readdir(new URL("../migrations/", import.meta.url))).filter(f => f.endsWith(".sql")).sort();
     for (const file of files.slice(0, 3)) await isolated.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
-    await isolated.query("INSERT INTO users(id,email) VALUES ($1,'existing@example.test')", [userA]);
+    await isolated.query("INSERT INTO users(id,email) VALUES ($1,'existing@example.test'),($2,'existing-free@example.test')", [userA,userB]);
     await isolated.query("INSERT INTO sessions(id,user_id,expires_at) VALUES ($1,$2,now()+interval '1 day')", [sessionA, userA]);
     const users = (await isolated.query("SELECT * FROM users")).rows;
     const sessions = (await isolated.query("SELECT * FROM sessions")).rows;
+    let entitlements, usage;
     const connection = await isolated.connect();
     try {
       for (const file of files.slice(3)) {
+        if (file.startsWith("010")) {
+          await connection.query("INSERT INTO subscription_entitlements(user_id,plan,status,current_period_start,current_period_end) VALUES ($1,'pro','active',$3,$4),($2,'free','inactive',NULL,NULL)", [userA,userB,start,end]);
+          await connection.query("INSERT INTO monthly_usage(user_id,metric,month_start,used) VALUES ($1,'job_analysis',date_trunc('month',now() AT TIME ZONE 'UTC')::date,7),($2,'job_analysis',date_trunc('month',now() AT TIME ZONE 'UTC')::date,2)", [userA,userB]);
+          entitlements = (await connection.query("SELECT * FROM subscription_entitlements ORDER BY user_id")).rows;
+          usage = (await connection.query("SELECT * FROM monthly_usage ORDER BY user_id")).rows;
+        }
         await connection.query("BEGIN");
         await connection.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
         await connection.query("COMMIT");
@@ -308,9 +315,14 @@ test("004-011 migrate an existing 001-003 database transactionally without backf
     } finally { connection.release(); }
     assert.deepEqual((await isolated.query("SELECT * FROM users")).rows, users);
     assert.deepEqual((await isolated.query("SELECT * FROM sessions")).rows, sessions);
-    for (const table of ["subscription_entitlements", "monthly_usage", "billing_events", "external_identities", "account_link_transactions", "paddle_sandbox_accounts"])
+    for (const table of ["billing_events", "external_identities", "account_link_transactions", "paddle_sandbox_accounts"])
       assert.equal((await isolated.query(`SELECT * FROM ${table}`)).rowCount, 0);
-    assert.equal((await createMonetizationStore(isolated).getEntitlement(userA)).plan, "free");
+    const upgraded = (await isolated.query("SELECT * FROM subscription_entitlements ORDER BY user_id")).rows;
+    assert.ok(upgraded.every(r => r.source === 'manual' && r.source_subscription_id === null));
+    assert.deepEqual(upgraded.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !['source', 'source_subscription_id'].includes(key)))), entitlements);
+    assert.deepEqual((await isolated.query("SELECT * FROM monthly_usage ORDER BY user_id")).rows, usage);
+    assert.equal((await createMonetizationStore(isolated).getEntitlement(userA)).plan, "pro");
+    assert.equal((await createMonetizationStore(isolated).getEntitlement(userB)).plan, "free");
     await assert.rejects(isolated.query("INSERT INTO paddle_sandbox_accounts(user_id,reconcile_attempts) VALUES ($1,4)", [userA]));
     await isolated.query("INSERT INTO paddle_sandbox_accounts(user_id) VALUES ($1)", [userA]);
     await isolated.query("DELETE FROM users WHERE id=$1", [userA]);
@@ -730,4 +742,95 @@ test("matching pool exhaustion is expected admission failure while a dedicated i
   }
   assert.equal((await createMonetizationStore(pool).consumeMonthlyUsage(userA, "job_analysis", 3)).allowed, true);
   assert.equal((await createMonetizationStore(pool).consumeMonthlyUsage(userA, "job_analysis")).allowed, false);
+});
+
+test("isolated staging guards every checkout, rejects mutable/wrong marker and privileged runtime roles", async () => {
+  const require = createRequire(import.meta.url);
+  const { guardStagingPool } = require('../lib/staging/database.ts');
+  await pool.query('CREATE ROLE paddle_staging_guard LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS');
+  await pool.query('CREATE DATABASE paddle_sandbox_guard');
+  const owner = new Pool({ host: directory, port: 6554, user: 'synthetic_operator', database: 'paddle_sandbox_guard' });
+  const raw = new Pool({ host: directory, port: 6554, user: 'paddle_staging_guard', database: 'paddle_sandbox_guard', max: 2 });
+  const cfg = { host: directory, port: 6554, user: 'paddle_staging_guard', database: 'paddle_sandbox_guard', identity: userA };
+  const guarded = guardStagingPool(raw, cfg);
+  try {
+    await assert.rejects(guarded.query('SELECT 1'), /identity rejected/);
+    const bootstrap = spawnSync(process.env.PADDLE_TEST_PSQL_BIN ?? 'psql', ['-X', '--host', directory, '--port', '6554', '--username', 'synthetic_operator',
+      '--dbname', cfg.database, '--set', `database=${cfg.database}`, '--set', `runtime_role=${cfg.user}`, '--set', `staging_id=${userA}`,
+      '--file', path.resolve('ops/staging/bootstrap-identity.sql')], { encoding: 'utf8', timeout: 15000 });
+    assert.equal(bootstrap.status, 0, bootstrap.error?.message ?? bootstrap.stderr);
+    assert.equal((await guarded.query('SELECT 42 AS answer')).rows[0].answer, 42);
+    const filename = path.join(directory, 'private-environment');
+    await writeFile(filename, `PADDLE_STAGING_PROFILE=isolated
+DEPLOYMENT_ENV=staging
+BILLING_DEPLOYMENT_ENV=sandbox
+PADDLE_STAGING_ID=${userA}
+PADDLE_SANDBOX_ENTITLEMENTS_ENABLED=false
+AUTH0_LINK_ENABLED=false
+PADDLE_SANDBOX_ENABLED=false
+PADDLE_RECONCILIATION_ENABLED=false
+PADDLE_WEBHOOK_WORKER_ENABLED=false
+APP_BASE_URL=https://sandbox.example.test
+RATE_LIMIT_SECRET=synthetic-private-launcher-testing-32
+PADDLE_SANDBOX_DATABASE_URL=postgresql:///paddle_sandbox_guard?host=${directory}&user=paddle_staging_guard&port=6554
+`, { mode: 0o600 });
+    const preflight = spawnSync(process.execPath, ['scripts/run-isolated-staging.mjs', 'preflight', filename], {
+      encoding: 'utf8', timeout: 15000, env: { ...process.env, DATABASE_URL: 'postgres://production.invalid/never', PGDATABASE: 'never', PGHOST: 'production.invalid' },
+    });
+    assert.equal(preflight.status, 0, preflight.stderr);
+    assert.equal(JSON.parse(preflight.stdout).isolated, true);
+    assert.ok(!preflight.stdout.includes(userA));
+    const clients = await Promise.all([guarded.connect(), guarded.connect()]); clients.forEach(c => c.release());
+    await owner.query('UPDATE staging_guard.identity SET identity=$1', [userB]);
+    await assert.rejects(guarded.connect(), /identity rejected/);
+    await owner.query('UPDATE staging_guard.identity SET identity=$1', [userA]);
+    await owner.query('GRANT UPDATE ON staging_guard.identity TO paddle_staging_guard');
+    await assert.rejects(guarded.query('SELECT 1'), /identity rejected/);
+    await owner.query('REVOKE UPDATE ON staging_guard.identity FROM paddle_staging_guard');
+    await pool.query('ALTER ROLE paddle_staging_guard CREATEDB');
+    await assert.rejects(guarded.connect(), /identity rejected/);
+    await pool.query('ALTER ROLE paddle_staging_guard NOCREATEDB');
+    assert.equal((await guarded.query('SELECT current_user AS role')).rows[0].role, cfg.user);
+    await pool.query('CREATE DATABASE unrelated_database');
+    try { await assert.rejects(guarded.connect(), /identity rejected/); }
+    finally { await pool.query('DROP DATABASE unrelated_database'); }
+  } finally { await raw.end(); await owner.end(); await pool.query('DROP DATABASE paddle_sandbox_guard'); await pool.query('DROP ROLE paddle_staging_guard'); }
+});
+
+test('bounded concurrent retention preserves processed receipts, unprocessed jobs and account entitlements', async () => {
+  const require = createRequire(import.meta.url); const { cleanupInbox, stagingHealth } = require('../lib/staging/maintenance.ts');
+  const { original, subscription } = await completed();
+  const inbox = createInbox(pool);
+  const e = signedDelivery(event('subscription.activated', 'a', subscription.id, original.custom_data));
+  await inbox.ingest(e); await inbox.runBatch(processQueued);
+  const before = (await pool.query('SELECT * FROM paddle_sandbox_accounts')).rows;
+  await pool.query("UPDATE paddle_sandbox_webhook_inbox SET finished_at=now()-interval '31 days'");
+  await inbox.ingest(signedDelivery(event('subscription.updated', 'b', subscription.id)));
+  const results = await Promise.all([cleanupInbox(pool, 1), cleanupInbox(pool, 1)]);
+  assert.equal(results.reduce((n, r) => n + r.deleted, 0), 1);
+  assert.equal((await pool.query('SELECT * FROM billing_events')).rowCount, 1);
+  assert.deepEqual((await pool.query('SELECT * FROM paddle_sandbox_accounts')).rows, before);
+  assert.equal((await pool.query('SELECT state FROM paddle_sandbox_webhook_inbox')).rows[0].state, 'pending');
+  await inbox.ingest(e); // Replay after retention still consults immutable processed receipt.
+  await inbox.runBatch(processQueued);
+  assert.equal((await pool.query('SELECT * FROM billing_events WHERE event_id=$1', [e.event_id])).rowCount, 1);
+  const health = await stagingHealth(pool); assert.equal(health.healthy, true);
+  assert.ok(!JSON.stringify(health).includes(userA));
+  await pool.query("UPDATE paddle_sandbox_accounts SET reconcile_attempts=3");
+  assert.equal((await stagingHealth(pool)).healthy, false);
+  await assert.rejects(cleanupInbox(pool, 101), /bound/);
+});
+
+test('periodic reconciliation creates an independent bounded provider per account and rolls back expired work', async () => {
+  await completed(); await completed(userB, sessionB, 'b');
+  let made = 0;
+  const worker = createStore(pool, config, api, () => {
+    made++;
+    return { ...api, checkDeadline() { if (made === 1) throw Error('synthetic expired deadline'); } };
+  });
+  const result = await worker.reconcileBatch();
+  assert.equal(made, 2); assert.equal(result.retry, 1); assert.equal(result.ok, 1);
+  const statuses = (await pool.query('SELECT subscription_id FROM paddle_sandbox_accounts')).rows;
+  assert.equal(statuses.filter(r => r.subscription_id !== null).length, 1);
+  assert.equal((await pool.query('SELECT * FROM subscription_entitlements')).rowCount, 0);
 });

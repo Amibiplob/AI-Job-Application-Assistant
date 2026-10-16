@@ -1,0 +1,10 @@
+# Review and install explicitly on the isolated staging host only.
+[Unit]
+Description=Isolated staging reconcile schedule
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=5min
+Unit=ai-job-staging@reconcile.service
+AccuracySec=5s
+[Install]
+WantedBy=timers.target

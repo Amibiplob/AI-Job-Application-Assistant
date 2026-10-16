@@ -19,6 +19,9 @@ const pid = (prefix, char = "a") => `${prefix}_${char.repeat(26)}`;
 const env = { PADDLE_SANDBOX_ENABLED: "true", BILLING_DEPLOYMENT_ENV: "sandbox", PADDLE_SANDBOX_API_KEY: `pdl_sdbx_apikey_${"k".repeat(32)}`,
   PADDLE_SANDBOX_WEBHOOK_SECRET: "secret-for-synthetic-testing-only-32", PADDLE_SANDBOX_CLIENT_TOKEN: `test_${"t".repeat(32)}`,
   PADDLE_SANDBOX_PRICE_ID: pid("pri"), APP_BASE_URL: "https://sandbox.example.test" };
+const isolatedWorker = { ...env, PADDLE_STAGING_PROFILE: "isolated", DEPLOYMENT_ENV: "staging",
+  PADDLE_STAGING_ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", AUTH0_LINK_ENABLED: "false",
+  PADDLE_SANDBOX_ENTITLEMENTS_ENABLED: "false", PADDLE_WEBHOOK_WORKER_ENABLED: "false", PADDLE_RECONCILIATION_ENABLED: "false" };
 const config = getConfig(env); assert.ok(config);
 const now = Date.now(); const start = new Date(now - 86400000).toISOString(), end = new Date(now + 86400000).toISOString();
 const items = [{ quantity: 1, price: { id: config.priceId } }];
@@ -101,8 +104,10 @@ test("sandbox integration has no quota writes and keeps the entitlement writer b
 });
 
 test("worker is disabled by default and refuses remote, production, ambiguous or non-sandbox databases", () => {
-  const base = { ...env, PADDLE_RECONCILIATION_ENABLED: "true", PADDLE_SANDBOX_DATABASE_URL: "postgresql:///paddle_sandbox_test?host=/tmp/paddle-isolated&user=synthetic_operator&port=6554" };
+  const base = { ...isolatedWorker, PADDLE_RECONCILIATION_ENABLED: "true", PADDLE_SANDBOX_DATABASE_URL: "postgresql:///paddle_sandbox_test?host=/tmp/paddle-isolated&user=paddle_staging_test&port=6554" };
   assert.equal(getWorkerConfig(base).database, "paddle_sandbox_test");
+  assert.equal(getWorkerConfig({ ...base, PADDLE_STAGING_PROFILE: undefined }), null);
+  assert.equal(getWorkerConfig({ ...base, PADDLE_SANDBOX_ENTITLEMENTS_ENABLED: "true" }), null);
   assert.equal(getWorkerConfig({ ...base, PADDLE_RECONCILIATION_ENABLED: "false" }), null);
   assert.equal(getWorkerConfig({ ...base, VERCEL_ENV: "production" }), null);
   for (const value of ["", "postgresql://prod.example/paddle_sandbox_test", "postgresql:///postgres?host=/tmp/test&user=test",
@@ -182,7 +187,7 @@ test("provider adapter propagates the worker deadline and redacts cancellation e
 });
 
 test("webhook worker is independently disabled and retains isolated sandbox database guards", () => {
-  const values = { ...env, PADDLE_WEBHOOK_WORKER_ENABLED: "true", PADDLE_SANDBOX_DATABASE_URL: "postgresql:///paddle_sandbox_test?host=/tmp/paddle-test&user=synthetic_operator" };
+  const values = { ...isolatedWorker, PADDLE_WEBHOOK_WORKER_ENABLED: "true", PADDLE_SANDBOX_DATABASE_URL: "postgresql:///paddle_sandbox_test?host=/tmp/paddle-test&user=paddle_staging_test" };
   assert.equal(getWorkerConfig(env, "webhook"), null);
   assert.ok(getWorkerConfig(values, "webhook"));
   assert.equal(getWorkerConfig(values), null); // Does not implicitly enable periodic reconciliation.

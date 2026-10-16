@@ -21,6 +21,7 @@ export function createPaddleSandboxClient(config: PaddleSandboxConfig, fetcher: 
     return (await envelope(path, method, body)).data;
   }
   return {
+    checkDeadline() { deadline?.throwIfAborted(); },
     async adjustment(id: string) {
       paddleId("adj").parse(id);
       const value = adjustmentSchema.parse(await api(`/adjustments/${id}`));

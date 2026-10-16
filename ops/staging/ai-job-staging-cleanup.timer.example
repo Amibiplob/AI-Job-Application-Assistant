@@ -1,0 +1,10 @@
+# Review and install explicitly on the isolated staging host only.
+[Unit]
+Description=Isolated staging cleanup schedule
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1h
+Unit=ai-job-staging@cleanup.service
+AccuracySec=5s
+[Install]
+WantedBy=timers.target

@@ -17,6 +17,7 @@ const otherSessionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const databaseName = "retention_synthetic_test";
 const context = new AsyncLocalStorage();
 let directory, server, pool, failure, connections, useResumeRole;
+const connectionClosures = [];
 const options = (mode, batchSize = 100) => ({ databaseName, mode, batchSize, ...(mode === "delete" ? { confirmation: databaseName } : {}) });
 
 const require = createRequire(import.meta.url);
@@ -81,6 +82,7 @@ before(async () => {
     await admin.query(`CREATE DATABASE ${databaseName}`);
   } finally { await admin.end(); }
   pool = new Pool({ ...config, database: databaseName, max: 15 });
+  pool.on("connect", client => connectionClosures.push(new Promise(resolve => client.once("end", resolve))));
   for (const filename of ["001_initial_schema.sql", "002_auth_sessions.sql", "003_rate_limits.sql"]) {
     await pool.query(await readFile(new URL(`../migrations/${filename}`, import.meta.url), "utf8"));
   }
@@ -88,6 +90,9 @@ before(async () => {
 
 after(async () => {
   await pool?.end();
+  // pg pool.end() can resolve before socket close events. Stop PostgreSQL only
+  // after clients finish closing, so shutdown cannot race their error handlers.
+  await Promise.all(connectionClosures);
   if (server && server.exitCode === null) {
     const stopped = new Promise(resolve => server.once("exit", resolve));
     server.kill("SIGINT"); await stopped;

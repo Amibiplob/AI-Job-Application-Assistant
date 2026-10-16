@@ -274,3 +274,7 @@ configured staging scheduling, cold-start load/SLO measurements, long-term archi
 and hosted worker connectivity are **NOT TESTED**. They remain rollout blockers;
 local test success does not make Phase 8 production ready. Production payments,
 paid MCP quotas and Auth0 linking remain disabled. No push is performed.
+
+## Isolated staging deployment preparation
+
+See [the isolated staging runbook](paddle-isolated-staging.md) for the fail-closed database profile, private systemd scheduling, operational bounds, cleanup policy, local evidence and remaining genuine sandbox acceptance gate. The templates are not deployed and entitlement activation remains disabled.

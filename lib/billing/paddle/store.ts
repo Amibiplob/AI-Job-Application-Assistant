@@ -16,13 +16,14 @@ type Row = {
 };
 const user = (id: string) => z.uuid().parse(id);
 
-export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, config: PaddleSandboxConfig, api: PaddleSandboxClient) {
+export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, config: PaddleSandboxConfig, api: PaddleSandboxClient, accountApi?: () => PaddleSandboxClient) {
   async function locked<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await db.connect(); let committed = false;
     try {
       await client.query("BEGIN");
       await client.query("SET LOCAL lock_timeout='5s'");
-      await client.query("SET LOCAL statement_timeout='15s'");
+      await client.query("SET LOCAL statement_timeout='5s'");
+      await client.query("SET LOCAL idle_in_transaction_session_timeout='35s'");
       const result = await operation(client);
       await client.query("COMMIT"); committed = true; return result;
     } catch { await client.query("ROLLBACK").catch(() => {}); throw new Error("Sandbox billing unavailable or outcome uncertain."); }
@@ -37,23 +38,23 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
       AND expires_at>clock_timestamp()`, [sessionId, userId]);
     if (result.rowCount !== 1) throw new Error("Session unavailable.");
   }
-  async function reconcile(client: PoolClient, row: Row, subscriptionId: string, eventAt?: string, adjustment?: Adjustment | null) {
+  async function reconcile(client: PoolClient, row: Row, subscriptionId: string, eventAt?: string, adjustment?: Adjustment | null, provider: PaddleSandboxClient = api) {
     if (!row.transaction_id) throw new Error("Checkout creation pending.");
     if (row.subscription_id && row.subscription_id !== subscriptionId) throw new Error("Conflicting subscription.");
     // Fetch only AFTER taking the owner lock, serializing all reconciliation
     // reads/writes. Webhook payload state and ordering never grant access.
-    const subscription = await api.subscription(subscriptionId);
-    const original = await api.transaction(row.transaction_id);
+    const subscription = await provider.subscription(subscriptionId);
+    const original = await provider.transaction(row.transaction_id);
     assertPlanItems(original.items, config.priceId);
     if (original.currency_code !== "USD" || original.custom_data?.link_intent !== row.intent_id || original.subscription_id !== subscription.id ||
         original.customer_id !== subscription.customer_id || original.status !== "completed" ||
         (row.customer_id && row.customer_id !== subscription.customer_id)) throw new Error("Checkout relationship mismatch.");
-    await api.verifyPrice();
-    const completed = await api.latestCompleted(subscription.id);
+    await provider.verifyPrice();
+    const completed = await provider.latestCompleted(subscription.id);
     const projection = projectSandboxSubscription(subscription, completed, config.priceId);
     // A canonical single adjustment read is also evidence: a stale list must
     // not hide a refund already confirmed by the provider's detail endpoint.
-    const revoked = completed ? paymentIsRevoked(completed, await api.adjustments(completed.id)) ||
+    const revoked = completed ? paymentIsRevoked(completed, await provider.adjustments(completed.id)) ||
       (adjustment?.transaction_id === completed.id && paymentIsRevoked(completed, [adjustment])) ||
       (row.verified_payment_id === completed.id && row.payment_revoked) : false;
     // Subscription updated_at does not order transactions or adjustments.
@@ -71,6 +72,7 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
       if ((incoming === previous && row.subscription_status !== projection.status) ||
           (row.subscription_status === "canceled" && projection.status !== "canceled")) throw new Error("Conflicting provider state.");
     }
+    provider.checkDeadline?.();
     await client.query(`UPDATE public.paddle_sandbox_accounts SET
       customer_id=$2, subscription_id=$3, checkout_state='linked', subscription_status=$4,
       provider_updated_at=$5::timestamptz, paid_start=$6::timestamptz, paid_through=$7::timestamptz,
@@ -220,10 +222,12 @@ export function createPaddleSandboxStore(db: Pick<Pool, "query" | "connect">, co
           if (!row?.transaction_id) return "skipped" as const;
           await client.query("SAVEPOINT reconcile_account");
           try {
-            const original = await api.transaction(row.transaction_id);
-            if (original.subscription_id) await reconcile(client, row, original.subscription_id);
+            const provider = accountApi?.() ?? api;
+            const original = await provider.transaction(row.transaction_id);
+            if (original.subscription_id) await reconcile(client, row, original.subscription_id, undefined, undefined, provider);
             else await client.query(`UPDATE public.paddle_sandbox_accounts SET reconcile_attempts=0,
               next_reconcile_at=clock_timestamp()+interval '15 minutes',last_reconcile_result='ok' WHERE user_id=$1`, [row.user_id]);
+            provider.checkDeadline?.();
             await client.query("RELEASE SAVEPOINT reconcile_account");
             return "ok" as const;
           } catch {

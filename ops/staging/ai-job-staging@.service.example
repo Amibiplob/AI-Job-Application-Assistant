@@ -1,0 +1,25 @@
+# Review paths and provision the dedicated OS account; this is not installed.
+[Unit]
+Description=Isolated AI Job staging operation %i
+After=network.target
+
+[Service]
+Type=oneshot
+User=paddle-staging
+Group=paddle-staging
+WorkingDirectory=/srv/ai-job-staging/app
+ExecStart=/usr/bin/timeout --signal=TERM --kill-after=10s 180s /usr/bin/node scripts/run-isolated-staging.mjs %i /etc/ai-job-staging/environment
+TimeoutStartSec=195
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+# Keep the verified Unix socket visible; PrivateTmp=true would hide it.
+PrivateTmp=false
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadOnlyPaths=/srv/ai-job-staging/app /etc/ai-job-staging/environment
+ReadWritePaths=/tmp/paddle-staging
+StandardOutput=journal
+StandardError=journal

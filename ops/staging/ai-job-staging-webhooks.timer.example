@@ -1,0 +1,10 @@
+# Review and install explicitly on the isolated staging host only.
+[Unit]
+Description=Isolated staging webhooks schedule
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=30s
+Unit=ai-job-staging@webhooks.service
+AccuracySec=5s
+[Install]
+WantedBy=timers.target

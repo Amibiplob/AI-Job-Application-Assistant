@@ -1,0 +1,10 @@
+# Review and install explicitly on the isolated staging host only.
+[Unit]
+Description=Isolated staging health schedule
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+Unit=ai-job-staging@health.service
+AccuracySec=5s
+[Install]
+WantedBy=timers.target
