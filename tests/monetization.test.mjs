@@ -134,7 +134,17 @@ test("concurrent instances admit exactly Free budget and never increment on deni
   const observedDb = {
     query: (...args) => pool.query(...args),
     async connect() {
-      try { return await pool.connect(); }
+      try {
+        const client = await pool.connect();
+        return { async query(sql, params) {
+          try { return await client.query(sql, params); }
+          catch (error) {
+            console.error("quota concurrency diagnostic", { phase: sql === "COMMIT" ? "commit" : "database-query",
+              sqlState: ["55P03", "40P01", "57014", "40001"].includes(error.code) ? error.code : "other" });
+            throw error;
+          }
+        }, release: discard => client.release(discard) };
+      }
       catch (error) {
         // Disposable DB only. Report a classification, never raw connection data.
         console.error("quota concurrency diagnostic", { phase: "pool-acquisition",
@@ -339,4 +349,33 @@ test("pool starvation reproduces redacted quota failure without granting or cons
   assert.equal((await store.getMonthlyUsage(userId, "job_analysis")).used, 0);
   const decisions = await Promise.all(Array.from({ length: 40 }, () => store.consumeMonthlyUsage(userId, "job_analysis")));
   assert.equal(decisions.filter(d => d.allowed).length, 3);
+});
+
+test("cold pool scheduler stall classifies acquisition failures without overcount or automatic retry", async () => {
+  // Reproduce resource starvation independently of quota contention. A fresh
+  // pool starts forty acquisitions under the original 500 ms harness deadline.
+  const cold = new Pool({ host: directory, port: 6552, user: "synthetic_operator", database: "postgres",
+    connectionTimeoutMillis: 500, max: 20 });
+  const closed = [];
+  cold.on("connect", client => closed.push(new Promise(resolve => client.once("end", resolve))));
+  let acquisitionTimeouts = 0;
+  const observed = { query: (...args) => cold.query(...args), async connect() {
+    try { return await cold.connect(); }
+    catch (error) {
+      if (/timeout exceeded when trying to connect|Connection terminated due to connection timeout/.test(error.message)) acquisitionTimeouts++;
+      throw error;
+    }
+  } };
+  try {
+    const admissions = Array.from({ length: 40 }, () => createMonetizationStore(observed).consumeMonthlyUsage(userId, "job_analysis"));
+    // Model an overloaded test host, not a provider or database state change.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
+    const settled = await Promise.allSettled(admissions);
+    assert.ok(acquisitionTimeouts > 0, "The injected stall must reproduce classified pg acquisition timeouts.");
+    const allowed = settled.filter(r => r.status === "fulfilled" && r.value.allowed).length;
+    assert.ok(allowed <= 3);
+    assert.equal((await store.getMonthlyUsage(userId, "job_analysis")).used, allowed);
+    for (const result of settled.filter(r => r.status === "rejected"))
+      assert.equal(result.reason.message, "Monetization operation failed or outcome could not be confirmed.");
+  } finally { await cold.end(); await Promise.all(closed); }
 });

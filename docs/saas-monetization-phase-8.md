@@ -1,5 +1,8 @@
 # Phase 8 — sandbox entitlement prerequisites
 
+Follow-up evidence: [Phase 8 verification attempt](saas-monetization-phase-8-verification.md).
+The original results below are retained as historical evidence.
+
 Baseline: `1f12869be35048d716b7800265ef9129949de580`. Read with
 [Phase 7](saas-monetization-phase-7.md) and its worker/credential instructions.
 Verification date: 2026-10-16. **Genuine Paddle acceptance remains UNVERIFIED.

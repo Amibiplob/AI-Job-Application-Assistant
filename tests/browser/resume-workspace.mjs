@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import {writeFile} from 'node:fs/promises';
 const targets=await (await fetch('http://127.0.0.1:9223/json')).json();
-const ws=new WebSocket(targets[0].webSocketDebuggerUrl);
+const ws=new WebSocket(targets.find(target=>target.type==='page').webSocketDebuggerUrl);
 await new Promise(resolve=>ws.addEventListener('open',resolve,{once:true}));
 let id=0; const pending=new Map(); let errors=[];
 ws.addEventListener('message',e=>{const d=JSON.parse(e.data);if(d.id){const p=pending.get(d.id);if(p){pending.delete(d.id);if(d.error)p.reject(d.error);else p.resolve(d.result);}}if(d.method==='Runtime.exceptionThrown')errors.push(d.params.exceptionDetails.text);if(d.method==='Runtime.consoleAPICalled'&&['error','warning'].includes(d.params.type))errors.push(d.params.args.map(a=>a.value||a.description).join(' '));});

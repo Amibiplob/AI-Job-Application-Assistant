@@ -8,6 +8,7 @@ const valid='11111111-1111-4111-8111-111111111111';
 const expired='22222222-2222-4222-8222-222222222222';
 const userId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const users=new Map();
+const rateAttempts=new Map();
 const sessions=new Map([
  [valid,{id:valid,user_id:userId,expires_at:new Date('2099-01-01')}],
  [expired,{id:expired,user_id:userId,expires_at:new Date('2000-01-01')}],
@@ -17,7 +18,14 @@ pg.Pool.prototype.query=async function(query,params=[]){
  await ready;
  const sql=typeof query==='string'?query:query.text;
  let rows=[];
- if(/SELECT id, user_id, expires_at/.test(sql)){const row=sessions.get(params[0]);if(row&&row.expires_at>new Date())rows=[row];}
+ if(/INSERT INTO abuse_rate_limits/.test(sql)) {
+  const key=JSON.stringify(params.slice(0,2)); const count=(rateAttempts.get(key)??0)+1;
+  rateAttempts.set(key,count);rows=[{allowed:count<=params[2],retry_after:1}];
+ }
+ else if(/AS month_start/.test(sql)) {
+  const now=new Date(); if(users.has(params[0]))rows=[{plan:'free',used:0,month_start:new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)).toISOString().slice(0,10),resets_at:new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+1,1)).toISOString().slice(0,10)}];
+ }
+ else if(/SELECT id, user_id, expires_at/.test(sql)){const row=sessions.get(params[0]);if(row&&row.expires_at>new Date())rows=[row];}
  else if(/INSERT INTO sessions/.test(sql))sessions.set(params[0],{id:params[0],user_id:params[1],expires_at:params[2]});
  else if(/DELETE FROM sessions/.test(sql))sessions.delete(params[0]);
  else if(/INSERT INTO users/.test(sql)){const id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';users.set(id,{id,name:params[0],email:params[1],password_hash:params[2]});rows=[{id}];}
