@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PublicLinks } from "@/components/layout/public-page";
 import { getCurrentUser } from "@/lib/auth";
 import {
   ArrowRight,
@@ -62,7 +63,8 @@ export default async function Home() {
           <div className="min-w-0">
             <p className="mb-6 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700"><span className="h-px w-6 bg-indigo-400" aria-hidden="true" /> A more considered career move</p>
             <h1 id="hero-heading" className="max-w-xl text-[clamp(2.5rem,5vw,4.25rem)] font-semibold leading-[1.08] tracking-[-0.055em]">Less scattered searching.<br /><span className="text-[#4F46E5]">More clarity on your next role.</span></h1>
-            <p className="mt-6 max-w-lg text-base leading-7 text-slate-600 sm:text-lg sm:leading-8">Bring your resume, job comparisons, and applications into one focused workspace. Understand the requirements before you decide what comes next.</p>
+            <p className="mt-6 max-w-lg text-base leading-7 text-slate-600 sm:text-lg sm:leading-8">For job seekers reviewing software and technical roles: bring your resume, job comparisons, and applications into one focused workspace. Understand the requirements before you decide what comes next.</p>
+            <ul className="mt-5 space-y-2 text-sm leading-6 text-slate-600"><li>Keep your experience ready in one saved resume.</li><li>Review recognized skill overlap with a consistent comparison.</li><li>Keep application progress, dates, and notes together.</li></ul>
             <div className="mt-8 flex flex-col gap-3 min-[400px]:flex-row">
               <Link href={workspaceHref} className={cn(buttonVariants(), primaryButton)}>{currentUser ? "Go to Dashboard" : "Create your workspace"} <ArrowRight aria-hidden="true" /></Link>
               <a href="#how-it-works" className={`inline-flex min-h-12 items-center justify-center rounded-xl px-4 text-sm font-medium text-slate-700 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>See how it works</a>
@@ -144,6 +146,7 @@ export default async function Home() {
       </main>
 
       <footer className="mx-auto flex w-full max-w-7xl flex-col justify-between gap-4 px-4 py-7 sm:flex-row sm:items-center sm:px-8 lg:px-12">
+        <PublicLinks />
         <p className="text-xs font-medium text-slate-600">AI Job Application Assistant</p>
         <p className="text-xs text-slate-500">A more organized search. A more considered next step.</p>
         <Link href={accountHref} className={`inline-flex min-h-11 w-fit items-center rounded-md text-sm font-medium text-slate-600 hover:text-indigo-700 hover:underline underline-offset-4 ${focus}`}>{accountLabel}</Link>

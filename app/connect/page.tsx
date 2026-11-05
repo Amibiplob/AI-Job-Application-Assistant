@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { PublicLinks } from "@/components/layout/public-page";
 import Link from "next/link";
 import { ArrowRight, BriefcaseBusiness, Check, Link2, ShieldCheck } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
@@ -118,7 +119,7 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
           <div className="flex flex-wrap gap-3"><Link href="/dashboard" className={cn(buttonVariants(), "min-h-11 px-4")}>Open dashboard<ArrowRight aria-hidden="true" /></Link>{!currentUser && <><Link href="/signup" className={cn(buttonVariants({ variant: "outline" }), "min-h-11 px-4")}>Create website account</Link><Link href="/login" className={textLink}>Sign in</Link></>}</div>
         </section>
       </main>
-      <footer className="border-t border-border bg-surface px-4 py-6 text-sm text-text-secondary sm:px-8"><div className="mx-auto flex max-w-7xl flex-wrap justify-between gap-3"><p>AI Job Application Assistant</p><Link href="/" className={textLink}>Back to the website</Link></div></footer>
+      <footer className="border-t border-border bg-surface px-4 py-6 text-sm text-text-secondary sm:px-8"><div className="mx-auto flex max-w-7xl flex-wrap justify-between gap-3"><p>AI Job Application Assistant</p><PublicLinks /><Link href="/" className={textLink}>Back to the website</Link></div></footer>
     </div>
   );
 }

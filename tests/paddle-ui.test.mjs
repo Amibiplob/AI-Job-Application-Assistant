@@ -29,8 +29,10 @@ beforeEach(() => { enabled = false; signedIn = true; available = true; fixtureSt
 test("pricing describes existing limits and unavailable paid access without rendering private credentials", () => {
   const html = renderToStaticMarkup(Pricing());
   assert.match(html, /3 successful website matches/); assert.match(html, /100 successful website matches/);
-  assert.match(html, /proposed \$10 USD\/month/); assert.match(html, /Paid access is not available/);
+  assert.match(html, /Draft price: \$10 USD\/month/); assert.match(html, /Paid access is not available/);
   assert.doesNotMatch(html, /private-api-key|private-webhook-secret/);
+  assert.match(html, /Pro — coming soon/);
+  assert.doesNotMatch(html, /<form|href="\/(?:billing\/checkout|dashboard\/billing)"|paddle\.com/);
 });
 test("billing requires website login and disabled/missing database cannot display checkout", async () => {
   signedIn = false; await assert.rejects(Billing(), /NEXT_REDIRECT/); signedIn = true;

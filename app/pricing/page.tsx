@@ -1,17 +1,27 @@
 import Link from "next/link";
-import { getPaddleSandboxConfig } from "@/lib/billing/paddle/config";
+import { PublicPage } from "@/components/layout/public-page";
+import { MONTHLY_LIMITS, PRO_DRAFT_PRICE } from "@/lib/plans";
 
+export const metadata = { title: "Pricing | AI Job Application Assistant" };
 export default function PricingPage() {
-  const sandbox = Boolean(getPaddleSandboxConfig());
-  return <main className="mx-auto max-w-4xl space-y-8 px-6 py-12 text-text-primary">
-    <Link href="/" className="text-brand underline">Home</Link>
-    <h1 className="text-3xl font-semibold">Website plans</h1>
-    <p>Compare saved jobs and pasted job descriptions with your resume. Matching uses deterministic skill overlap.</p>
+  return <PublicPage title="Website plans">
+    <p className="max-w-2xl leading-7 text-text-secondary">Start with a free workspace for your resume, skill comparisons, and application tracker.</p>
     <div className="grid gap-6 sm:grid-cols-2">
-      <section className="rounded-xl border border-border bg-surface p-6"><h2 className="text-xl font-semibold">Free — $0</h2><p className="mt-3">3 successful website matches per UTC calendar month.</p><Link className="mt-4 inline-block text-brand underline" href="/signup">Create an account</Link></section>
-      <section className="rounded-xl border border-border bg-surface p-6"><h2 className="text-xl font-semibold">Pro — proposed $10 USD/month</h2><p className="mt-3">100 successful website matches per UTC calendar month.</p><p className="mt-3">Paid access is not available yet. Sandbox checkouts use test payments. Test Pro activation is available only in an enabled sandbox.</p><Link className="mt-4 inline-block text-brand underline" href="/dashboard/billing">View billing status</Link></section>
+      <section className="space-y-4 rounded-xl border border-border bg-surface p-6">
+        <h2 className="text-xl font-semibold">Free — $0</h2><p>Available now</p>
+        <p>{MONTHLY_LIMITS.free.job_analysis} successful website matches per UTC calendar month.</p>
+        <ul className="list-inside list-disc space-y-2 text-sm leading-6"><li>Save and update your resume text</li><li>Compare listed or pasted job descriptions</li><li>Track applications, dates, and notes</li></ul>
+        <Link className="inline-flex min-h-11 items-center font-medium text-brand underline" href="/signup">Create a free account</Link>
+      </section>
+      <section className="space-y-4 rounded-xl border border-border bg-surface p-6">
+        <h2 className="text-xl font-semibold">Pro — coming soon</h2>
+        <p>Draft price: {PRO_DRAFT_PRICE}, before applicable taxes. Price and offer are subject to review.</p>
+        <p>Planned allowance: {MONTHLY_LIMITS.pro.job_analysis} successful website matches per UTC calendar month.</p>
+        <p>Paid access is not available. There is no checkout or payment required for the free workspace.</p>
+      </section>
     </div>
-    <p className="text-sm text-text-secondary">Saved-job and pasted-description comparisons share the allowance. Invalid or failed comparisons do not count. No unlimited AI usage is included. MCP paid plans are not enabled.</p>
-    <p className="text-sm text-text-secondary">{sandbox ? "Sandbox billing tests are configured for this environment." : "Checkout is disabled in this environment."} The proposed price is before any applicable taxes; real payments are not accepted.</p>
-  </main>;
+    <p className="text-sm leading-6 text-text-secondary">Saved-job and pasted-description comparisons share the allowance. Completed comparisons count, including zero-overlap and unscored results. Invalid or failed comparisons do not count.</p>
+    <p className="text-sm leading-6 text-text-secondary">MCP tools have separate abuse rate limits and no monthly paid plan. Pro does not unlock extra MCP capabilities. No unlimited AI usage is included.</p>
+    <p className="text-sm leading-6 text-text-secondary">Matching checks a fixed skill dictionary; it does not predict hiring outcomes. Listings include clearly labeled demonstration data and unverified records.</p>
+  </PublicPage>;
 }

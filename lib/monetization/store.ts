@@ -3,13 +3,11 @@ import "server-only";
 import type { Pool, PoolClient } from "pg";
 import { sandboxEntitlementsEnabled } from "@/lib/billing/paddle/config";
 
+import { MONTHLY_LIMITS } from "@/lib/plans";
+export { MONTHLY_LIMITS } from "@/lib/plans";
+
 export type Plan = "free" | "pro";
 export type UsageMetric = "job_analysis";
-// Provisional website policy. Never take limits from a client.
-export const MONTHLY_LIMITS = Object.freeze({
-  free: Object.freeze({ job_analysis: 3 }),
-  pro: Object.freeze({ job_analysis: 100 }),
-});
 export type Entitlement = { plan: Plan; monthlyLimits: typeof MONTHLY_LIMITS[Plan] };
 export type Usage = { plan: Plan; used: number; limit: number; remaining: number; monthStart: string; resetsAt: string };
 export type MeteredResult<T> =
