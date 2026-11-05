@@ -6,6 +6,9 @@ export function PublicLinks() {
     <Link className="inline-flex min-h-11 items-center underline underline-offset-4" href="/pricing">Pricing</Link>
     <Link className="inline-flex min-h-11 items-center underline underline-offset-4" href="/faq">FAQ</Link>
     <Link className="inline-flex min-h-11 items-center underline underline-offset-4" href="/contact">Contact</Link>
+    <Link className="inline-flex min-h-11 items-center underline underline-offset-4" href="/terms">Terms (draft)</Link>
+    <Link className="inline-flex min-h-11 items-center underline underline-offset-4" href="/refund-policy">Refund Policy (draft)</Link>
+    <Link className="inline-flex min-h-11 items-center underline underline-offset-4" href="/privacy">Privacy (draft)</Link>
   </div>;
 }
 

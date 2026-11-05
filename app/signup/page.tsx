@@ -33,6 +33,7 @@ export default async function SignupPage() {
           </p>
 
           <SignupForm />
+          <p className="mt-4 text-xs leading-6 text-text-secondary">Review the <Link href="/terms" className="underline">Terms draft</Link> and <Link href="/privacy" className="underline">Privacy Notice draft</Link>. These review copies are awaiting owner/legal approval.</p>
 
           <p className="mt-6 text-center text-sm text-[#687069]">
             Already have an account?{" "}

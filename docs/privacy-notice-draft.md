@@ -1,5 +1,11 @@
 # Privacy notice draft
 
+Historical Phase 7 review material. The free-launch preparation adds a separate,
+explicitly labeled review page at `app/privacy/page.tsx`; it is not an adopted
+policy. See `docs/LAUNCH.md` for remaining publication gates. Later API-key and
+self-service account controls supersede the missing-feature descriptions below.
+
+
 **INTERNAL DRAFT - NOT APPROVED FOR PUBLICATION.** Updated for Phase 7D.2.
 This is review material, not the service's published privacy notice or a legal
 compliance determination. Do not serve this document at `/privacy` or put its

@@ -25,7 +25,7 @@ export default async function ResumePage() {
     <div className="mx-auto max-w-6xl px-5 py-8 sm:px-8 lg:px-10 lg:py-10">
       <PageHeader eyebrow="Your profile" title="Your resume" description="Keep your experience in one place. Save your resume, then use it to explore how your skills align with a job description." />
       <div className="mt-8 grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
-        <ResumeEditor resume={resume} />
+        <div className="min-w-0"><ResumeEditor resume={resume} /><p className="mt-4 text-xs leading-6 text-text-secondary">Save only the personal information needed for your comparisons. <Link href="/privacy" className="text-brand underline">Privacy Notice (draft)</Link>.</p></div>
         <Card className="gap-0 bg-surface-muted py-0 shadow-none">
           <CardContent className="p-5 sm:p-6">
             <ScanText aria-hidden="true" className="size-5 text-brand" />
